@@ -23,6 +23,10 @@ Aucun serveur, aucune dépendance : c'est du HTML, du CSS et du JavaScript pur.
 Tes données restent dans ton navigateur (`localStorage`). Elles ne sont envoyées nulle part. Seules les polices Google Fonts sont chargées depuis Internet.
 Le dépôt ne contient aucune donnée personnelle : `data.js` est un modèle vide. Pense à utiliser l'export JSON pour sauvegarder ton CV, car vider les données du navigateur l'efface.
 
+## Licence
+
+Utilisation libre, modification et redistribution interdites sans accord de l'auteur. Voir [LICENSE](LICENSE).
+
 ## Structure
 
 | Fichier | Rôle |
