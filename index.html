@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CV modulaire</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=20261116r">
+</head>
+<body>
+  <aside class="sidebar">
+    <h1 class="brand">CV modulaire</h1>
+
+    <div class="block">
+      <p class="label" id="label-language"></p>
+      <div class="segmented" role="group">
+        <button type="button" data-lang="fr" aria-pressed="true">Français</button>
+        <button type="button" data-lang="en" aria-pressed="false">English</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <p class="label" id="label-profiles"></p>
+      <div class="chips" id="profiles"></div>
+    </div>
+
+    <details class="block fold">
+      <summary class="label" id="label-configs"></summary>
+      <p class="hint" id="configs-hint"></p>
+      <div class="config-save">
+        <input type="text" id="config-name" maxlength="40" autocomplete="off">
+        <button type="button" class="chip" id="config-save"></button>
+      </div>
+      <ul class="config-list" id="config-list"></ul>
+      <div class="options">
+        <button type="button" class="chip" id="backup-export"></button>
+        <button type="button" class="chip" id="backup-import"></button>
+        <input type="file" id="backup-file" accept="application/json,.json" hidden>
+      </div>
+      <p class="hint" id="save-status"></p>
+    </details>
+
+    <details class="block fold">
+      <summary class="label" id="label-edit"></summary>
+      <p class="hint" id="edit-hint"></p>
+      <button type="button" class="chip" id="reset-texts"></button>
+    </details>
+
+    <div id="controls"></div>
+
+    <div class="export">
+      <button type="button" class="primary" id="export-btn"></button>
+      <p class="hint" id="export-hint"></p>
+    </div>
+  </aside>
+
+  <main class="preview">
+    <div id="a4-probe" aria-hidden="true"></div>
+    <article id="cv" class="page"></article>
+  </main>
+
+  <script src="data.js?v=20261116r"></script>
+  <script src="app.js?v=20261116r"></script>
+</body>
+</html>

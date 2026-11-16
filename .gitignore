@@ -1,0 +1,12 @@
+.DS_Store
+.vscode/
+.claude/
+*.log
+# PDF d'origine (références personnelles, non nécessaires au projet)
+*.pdf
+# Image source volumineuse (la version web est photo-pro.jpg)
+*-source.png
+# Données et photos personnelles : ne jamais publier
+photo.jpg
+photo-pro.jpg
+linkedin.md
