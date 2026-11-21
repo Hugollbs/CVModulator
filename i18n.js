@@ -59,6 +59,8 @@ const UI_TEXT = {
   importPhoto: { fr: "Importer une autre photo", en: "Import another photo" },
   photoChoices: { fr: "Photos proposées", en: "Provided photos" },
   photoError: { fr: "Fichier image invalide ou illisible.", en: "Invalid or unreadable image file." },
+  photoType: { fr: "Format non accepté : choisis une image JPEG, PNG ou WebP.", en: "Format not accepted: choose a JPEG, PNG or WebP image." },
+  photoSize: { fr: "Photo trop lourde : {mb} Mo maximum.", en: "Photo too large: {mb} MB maximum." },
   add: { fr: "+ Ajouter", en: "+ Add" },
   addBullet: { fr: "+ Puce", en: "+ Bullet" },
   addSubmit: { fr: "Ajouter", en: "Add" },

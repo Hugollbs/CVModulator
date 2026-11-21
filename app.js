@@ -9,6 +9,7 @@ try {
 }
 
 const STORAGE_KEY = "cv-modulaire-v2";
+const PHOTO_KEY = "cv-modulaire-photo-v1"; // la photo a sa propre clé : inutile de la réécrire à chaque case cochée
 
 const PHOTO_MAX_SIDE = 800; // px : réduit la photo importée pour tenir dans le stockage local
 const PHOTO_QUALITY = 0.85;
@@ -78,10 +79,21 @@ function saveState() {
   saveTimer = null;
   if (state.blocked.has(STORAGE_KEY)) return setSaveStatus(false);
   try {
-    storageBackend.setItem(STORAGE_KEY, JSON.stringify(fullState()));
+    const { photo, ...progress } = fullState();
+    storageBackend.setItem(STORAGE_KEY, JSON.stringify(progress));
     setSaveStatus(true);
   } catch (err) {
     console.warn("Sauvegarde locale impossible :", err);
+    setSaveStatus(false);
+  }
+}
+
+function savePhoto() {
+  try {
+    if (state.photo) storageBackend.setItem(PHOTO_KEY, state.photo);
+    else storageBackend.removeItem(PHOTO_KEY);
+  } catch (err) {
+    console.warn("Sauvegarde de la photo impossible :", err);
     setSaveStatus(false);
   }
 }
@@ -201,8 +213,21 @@ function applySaved(saved) {
   if (saved.github !== undefined) state.github = validGithub(saved.github);
   if (CV.photos.some((p) => p.id === saved.photoChoice)) state.photoChoice = saved.photoChoice;
   if (CV.summary.variants.some((v) => v.id === saved.summaryChoice)) state.summaryChoice = saved.summaryChoice;
-  if (typeof saved.photo === "string" && saved.photo.startsWith("data:image/")) state.photo = saved.photo;
+  const photo = validPhoto(saved.photo);
+  if (photo) state.photo = photo;
   return true;
+}
+
+// Photo : clé dédiée. Une ancienne sauvegarde la gardait dans la progression : on la déplace.
+function loadPhoto() {
+  let stored = null;
+  try {
+    stored = validPhoto(storageBackend.getItem(PHOTO_KEY));
+  } catch (err) {
+    console.warn("Lecture de la photo impossible :", err);
+  }
+  if (stored) state.photo = stored;
+  else if (state.photo) savePhoto();
 }
 
 // Chaque clé est lue séparément : une progression corrompue ne doit pas faire perdre les configurations.
@@ -212,6 +237,7 @@ function loadState() {
   const saved = readKey(STORAGE_KEY);
   const restored = applySaved(saved);
   if (saved !== null && !restored && !backupRaw(STORAGE_KEY, JSON.stringify(saved))) state.blocked.add(STORAGE_KEY);
+  loadPhoto();
   state.configs = validConfigs(readKey(CONFIGS_KEY), dataContext());
   if (!restored) applyProfile("all");
 }
@@ -467,6 +493,7 @@ async function importBackup(file) {
     if (!window.confirm(UI_TEXT.importConfirm[state.lang])) return;
     if (!applyBackup(backup)) throw new Error("progression invalide");
     saveState();
+    savePhoto();
     saveConfigs();
     refreshAll();
   } catch (err) {
@@ -633,10 +660,26 @@ function levelSlider(item, enabled) {
   return wrapper;
 }
 
-// Redimensionne l'image importée et la renvoie en data URL JPEG.
+// Erreur de photo avec un code, pour afficher un message précis à l'utilisateur.
+function photoError(code) {
+  const err = new Error("photo : " + code);
+  err.code = code;
+  return err;
+}
+
+function photoErrorText(err) {
+  if (err.code === "type") return UI_TEXT.photoType[state.lang];
+  if (err.code === "size") return UI_TEXT.photoSize[state.lang].replace("{mb}", String(MAX_PHOTO_FILE_BYTES / (1024 * 1024)));
+  return UI_TEXT.photoError[state.lang];
+}
+
+// Redimensionne l'image importée et la renvoie en data URL JPEG. Le passage par un canvas ré-encode
+// l'image : ce qu'on stocke est toujours un JPEG que l'on a produit nous-mêmes.
 function readPhoto(file) {
   return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) return reject(new Error("not an image"));
+    // Contrôles avant tout décodage : on ne charge pas un fichier inutilement lourd ou d'un type non prévu.
+    if (!PHOTO_TYPES.includes(file.type)) return reject(photoError("type"));
+    if (file.size > MAX_PHOTO_FILE_BYTES) return reject(photoError("size"));
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -646,11 +689,13 @@ function readPhoto(file) {
       canvas.height = Math.round(img.height * scale);
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL("image/jpeg", PHOTO_QUALITY));
+      const result = validPhoto(canvas.toDataURL("image/jpeg", PHOTO_QUALITY));
+      if (result) resolve(result);
+      else reject(photoError("size"));
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("unreadable image"));
+      reject(photoError("unreadable"));
     };
     img.src = url;
   });
@@ -723,7 +768,7 @@ function photoControls() {
   const actions = el("div", "photo-actions");
   const file = document.createElement("input");
   file.type = "file";
-  file.accept = "image/*";
+  file.accept = PHOTO_TYPES.join(",");
   file.hidden = true;
   const message = el("p", "error");
   file.addEventListener("change", async () => {
@@ -731,12 +776,13 @@ function photoControls() {
     if (!file.files[0]) return;
     try {
       state.photo = await readPhoto(file.files[0]);
+      savePhoto();
       saveState();
       renderControls();
       renderCV();
     } catch (err) {
       console.warn("Import de photo impossible :", err);
-      message.textContent = UI_TEXT.photoError[state.lang];
+      message.textContent = photoErrorText(err);
     }
     file.value = "";
   });
@@ -756,6 +802,7 @@ function photoControls() {
     btn.addEventListener("click", () => {
       state.photoChoice = photo.id;
       state.photo = null;
+      savePhoto();
       saveState();
       renderControls();
       renderCV();
