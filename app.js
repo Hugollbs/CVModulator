@@ -551,8 +551,6 @@ function saveConfig() {
 function loadConfig(index) {
   const config = state.configs[index];
   if (!config || !applySaved(config.data)) return;
-  // Une photo importée est globale : une configuration n'en garde que le choix « utiliser l'importée ».
-  if (!config.data.customPhoto) state.photo = null;
   saveState();
   refreshAll();
 }
