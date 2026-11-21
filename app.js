@@ -38,6 +38,7 @@ const UI_TEXT = {
   importConfirm: { fr: "Remplacer ta progression et tes configurations actuelles par cette sauvegarde ?", en: "Replace your current progress and configurations with this backup?" },
   importError: { fr: "Sauvegarde invalide ou illisible.", en: "Invalid or unreadable backup." },
   saveOk: { fr: "Progression enregistrée automatiquement.", en: "Progress saved automatically." },
+  saveBlocked: { fr: "Sauvegarde locale illisible et impossible à copier : l'enregistrement est désactivé pour ne rien écraser.", en: "Local save is unreadable and cannot be copied: saving is disabled so nothing is overwritten." },
   saveError: { fr: "Enregistrement impossible (stockage plein ou bloqué par le navigateur).", en: "Cannot save (storage full or blocked by the browser)." },
   editLabel: { fr: "Textes", en: "Texts" },
   editHint: {
@@ -127,7 +128,7 @@ const BASE = { summary: CV.summary, experience: CV.experience, education: CV.edu
 
 const DEFAULT_TITLE_COLOR = "#5b4391";
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], saveFailed: false, lang: "fr", checked: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
+const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
 
 // --- Sauvegarde locale (facultative : le CV marche sans) ---
 // Tout ce qui constitue la progression (sélection + textes + photo importée).
@@ -145,12 +146,14 @@ function setSaveStatus(ok) {
   state.saveFailed = !ok;
   const status = document.getElementById("save-status");
   if (status) {
-    status.textContent = ok ? UI_TEXT.saveOk[state.lang] : UI_TEXT.saveError[state.lang];
+    const failure = state.blocked.size > 0 ? UI_TEXT.saveBlocked : UI_TEXT.saveError;
+    status.textContent = ok ? UI_TEXT.saveOk[state.lang] : failure[state.lang];
     status.classList.toggle("error", !ok);
   }
 }
 
 function saveState() {
+  if (state.blocked.has(STORAGE_KEY)) return setSaveStatus(false);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(fullState()));
     setSaveStatus(true);
@@ -161,12 +164,45 @@ function saveState() {
 }
 
 function saveConfigs() {
+  if (state.blocked.has(CONFIGS_KEY)) return setSaveStatus(false);
   try {
     localStorage.setItem(CONFIGS_KEY, JSON.stringify(state.configs));
     setSaveStatus(true);
   } catch (err) {
     console.warn("Sauvegarde des configurations impossible :", err);
     setSaveStatus(false);
+  }
+}
+
+// Copie brute d'une clé illisible : on ne l'écrase jamais sans en avoir gardé une trace.
+const CORRUPT_SUFFIX = "-corrompu";
+function backupRaw(key, raw) {
+  try {
+    localStorage.setItem(key + CORRUPT_SUFFIX, raw);
+    return true;
+  } catch (err) {
+    console.warn("Copie de la clé illisible impossible :", key, err);
+    return false;
+  }
+}
+
+// Lit une clé JSON. Si elle est illisible et qu'on ne peut pas en garder une copie,
+// on bloque son écriture pour ne pas détruire ce qu'elle contient.
+function readKey(key) {
+  let raw = null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch (err) {
+    console.warn("Stockage local inaccessible :", err);
+    return null;
+  }
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn("Clé illisible :", key, err);
+    if (!backupRaw(key, raw)) state.blocked.add(key);
+    return null;
   }
 }
 
@@ -353,16 +389,14 @@ function validConfigs(raw) {
     } }));
 }
 
+// Chaque clé est lue séparément : une progression corrompue ne doit pas faire perdre les configurations.
 function loadState() {
   state.levels = defaultLevels();
   state.edits = validEdits(null);
-  let restored = false;
-  try {
-    restored = applySaved(JSON.parse(localStorage.getItem(STORAGE_KEY)));
-    state.configs = validConfigs(JSON.parse(localStorage.getItem(CONFIGS_KEY)));
-  } catch (err) {
-    console.warn("Lecture de la sauvegarde impossible :", err);
-  }
+  const saved = readKey(STORAGE_KEY);
+  const restored = applySaved(saved);
+  if (saved !== null && !restored && !backupRaw(STORAGE_KEY, JSON.stringify(saved))) state.blocked.add(STORAGE_KEY);
+  state.configs = validConfigs(readKey(CONFIGS_KEY));
   if (!restored) applyProfile("all");
 }
 
