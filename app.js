@@ -1,134 +1,37 @@
 // Interface : cases à cocher (panneau de gauche) + rendu du CV (aperçu A4 à droite).
 
+// Le stockage est dans une variable pour que les tests puissent le remplacer (sans toucher aux vraies données).
+let storageBackend = null;
+try {
+  storageBackend = window.localStorage;
+} catch (err) {
+  console.warn("Stockage local indisponible :", err);
+}
+
 const STORAGE_KEY = "cv-modulaire-v2";
-const UI_TEXT = {
-  subtitle: { fr: "Sous-titre (objectif recherché)", en: "Subtitle (what you are looking for)" },
-  language: { fr: "Langue", en: "Language" },
-  profiles: { fr: "Profils", en: "Profiles" },
-  content: { fr: "Contenu du CV", en: "CV content" },
-  export: { fr: "Exporter en PDF", en: "Export as PDF" },
-  hint: {
-    fr: "Dans la fenêtre d'impression, choisis « Enregistrer au format PDF » et désactive les en-têtes/pieds de page.",
-    en: "In the print dialog, choose “Save as PDF” and turn off headers and footers.",
-  },
-  contactLabel: { fr: "Coordonnées", en: "Contact details" },
-  contactFields: {
-    address: { fr: "Adresse", en: "Address" },
-    phone: { fr: "Téléphone", en: "Phone" },
-    email: { fr: "E-mail", en: "E-mail" },
-    github: { fr: "GitHub", en: "GitHub" },
-  },
-  githubPlaceholder: { fr: "github.com/pseudo", en: "github.com/username" },
-  hideContact: { fr: "Masquer toutes les coordonnées", en: "Hide all contact details" },
-  showContact: { fr: "Afficher toutes les coordonnées", en: "Show all contact details" },
-  configsLabel: { fr: "Configurations", en: "Configurations" },
-  configsHint: {
-    fr: "Ta progression est enregistrée automatiquement dans ce navigateur. Une configuration garde la sélection actuelle (cases, langue, niveaux, photo, présentation) sous un nom. Les textes modifiés sont permanents et communs à toutes les configurations.",
-    en: "Your progress is saved automatically in this browser. A configuration stores the current selection (checkboxes, language, levels, photo, summary) under a name. Edited texts are permanent and shared by all configurations.",
-  },
-  configName: { fr: "Nom de la configuration", en: "Configuration name" },
-  configSave: { fr: "Enregistrer", en: "Save" },
-  configLoad: { fr: "Charger", en: "Load" },
-  configDelete: { fr: "Supprimer", en: "Delete" },
-  configOverwrite: { fr: "Une configuration porte déjà ce nom. La remplacer ?", en: "A configuration with this name already exists. Replace it?" },
-  configDeleteConfirm: { fr: "Supprimer cette configuration ?", en: "Delete this configuration?" },
-  configMissing: { fr: "{n} élément(s) de cette configuration n'existent plus et ont été ignorés.", en: "{n} item(s) of this configuration no longer exist and were ignored." },
-  configFull: { fr: "Nombre maximum de configurations atteint.", en: "Maximum number of configurations reached." },
-  backupExport: { fr: "Exporter une sauvegarde", en: "Export a backup" },
-  backupImport: { fr: "Importer une sauvegarde", en: "Import a backup" },
-  importConfirm: { fr: "Remplacer ta progression et tes configurations actuelles par cette sauvegarde ?", en: "Replace your current progress and configurations with this backup?" },
-  importError: { fr: "Sauvegarde invalide ou illisible.", en: "Invalid or unreadable backup." },
-  saveOk: { fr: "Progression enregistrée automatiquement.", en: "Progress saved automatically." },
-  saveBlocked: { fr: "Sauvegarde locale illisible et impossible à copier : l'enregistrement est désactivé pour ne rien écraser.", en: "Local save is unreadable and cannot be copied: saving is disabled so nothing is overwritten." },
-  saveError: { fr: "Enregistrement impossible (stockage plein ou bloqué par le navigateur).", en: "Cannot save (storage full or blocked by the browser)." },
-  editLabel: { fr: "Textes", en: "Texts" },
-  editHint: {
-    fr: "Clique sur un texte du CV pour le modifier. Les modifications sont permanentes (enregistrées dans ce navigateur), séparément pour le français et l'anglais.",
-    en: "Click any text in the CV to edit it. Changes are permanent (saved in this browser), separately for French and English.",
-  },
-  resetTexts: { fr: "Rétablir les textes d'origine", en: "Restore original texts" },
-  confirmReset: { fr: "Rétablir tous les textes d'origine (français uniquement) ?", en: "Restore all original texts (English only)?" },
-  summaryText: { fr: "Texte de présentation", en: "Summary text" },
-  photo: { fr: "Photo", en: "Photo" },
-  showPhoto: { fr: "Afficher la photo", en: "Show photo" },
-  titleColor: { fr: "Couleur des titres", en: "Heading colour" },
-  resetColor: { fr: "Couleur d'origine", en: "Default colour" },
-  onePage: { fr: "Tenir sur une page (réduit la taille)", en: "Fit on one page (shrinks size)" },
-  layout: { fr: "Mise en page", en: "Layout" },
-  importPhoto: { fr: "Importer une autre photo", en: "Import another photo" },
-  photoChoices: { fr: "Photos proposées", en: "Provided photos" },
-  photoError: { fr: "Fichier image invalide ou illisible.", en: "Invalid or unreadable image file." },
-  add: { fr: "+ Ajouter", en: "+ Add" },
-  addBullet: { fr: "+ Puce", en: "+ Bullet" },
-  addSubmit: { fr: "Ajouter", en: "Add" },
-  remove: { fr: "Supprimer", en: "Remove" },
-  removeConfirm: { fr: "Supprimer cet élément ajouté ?", en: "Remove this added item?" },
-  addError: { fr: "Ajout impossible (champ manquant ou limite atteinte).", en: "Cannot add (missing field or limit reached)." },
-  addHint: {
-    fr: "Le texte est utilisé en français et en anglais : passe dans l'autre langue et clique sur le texte dans le CV pour le traduire.",
-    en: "The text is used in both French and English: switch language and click the text in the CV to translate it.",
-  },
-  multilineHint: { fr: "Une ligne = une puce.", en: "One line = one bullet." },
-  fields: {
-    title: { fr: "Intitulé", en: "Title" },
-    org: { fr: "Structure / lieu (facultatif)", en: "Organisation / place (optional)" },
-    dates: { fr: "Dates (facultatif)", en: "Dates (optional)" },
-    detail: { fr: "Détail (facultatif)", en: "Detail (optional)" },
-    label: { fr: "Libellé", en: "Label" },
-    text: { fr: "Texte (facultatif)", en: "Text (optional)" },
-    bulletText: { fr: "Texte de la puce", en: "Bullet text" },
-    language: { fr: "Langue", en: "Language" },
-    level: { fr: "Avec niveau (curseur B1 à C2)", en: "With level (B1 to C2 slider)" },
-    summaryText: { fr: "Nouveau texte de présentation", en: "New summary text" },
-  },
-  identityLabel: { fr: "Identité", en: "Identity" },
-  flagged: { fr: "à confirmer", en: "to confirm" },
-  sections: {
-    summary: { fr: "Présentation", en: "Summary" },
-    experience: { fr: "Expérience", en: "Experience" },
-    education: { fr: "Études", en: "Education" },
-    languages: { fr: "Langues", en: "Languages" },
-  },
-};
-UI_TEXT.contactFields.name = { fr: "Nom", en: "Name" };
 
 const PHOTO_MAX_SIDE = 800; // px : réduit la photo importée pour tenir dans le stockage local
 const PHOTO_QUALITY = 0.85;
 const CONFIGS_KEY = "cv-modulaire-configs-v1";
-const MAX_CONFIGS = 30;
-const MAX_CONFIG_NAME = 40;
-const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
-const MAX_EDIT_LENGTH = 2000;
 // edits[langue][clé] = texte modifié ; la clé identifie un texte du CV (ex. "exp-dsin:title").
-const CONTACT_FIELDS = ["address", "phone", "email", "github"];
-const GITHUB_MAX_LENGTH = 100;
-// Violet foncé d'origine des titres ; la couleur est validée avant d'être appliquée au CSS.
-const MAX_CUSTOM = 200;
-const MAX_FIELD_LENGTH = 200; // champs d'une seule ligne dans les formulaires d'ajout
-const MAX_IDENTITY_LENGTH = 100;
-const IDENTITY_FIELDS = ["name", "address", "phone", "email"];
-const CUSTOM_ID = /^c[a-z0-9]{4,12}$/;
 const DEFAULT_LEVEL = "B2";
-// Champs conservés pour chaque type d'élément ajouté, et champ obligatoire.
-const CUSTOM_FIELDS = {
-  exp: ["title", "org", "dates", "flag"],
-  bullet: ["text"],
-  edu: ["title", "org", "dates", "detail"],
-  item: ["label", "text", "dates", "flag"],
-  lang: ["text"],
-  summary: ["text", "label"],
-};
-// Chaque champ `x` a une variante anglaise facultative `xEn` : sans elle, le texte vaut pour les deux langues.
-const CUSTOM_REQUIRED = { exp: "title", bullet: "text", edu: "title", item: "label", lang: "text", summary: "text" };
-
 // Profil vide, défini ici pour ne pas toucher aux données d'origine.
 PROFILES.empty = { label: { fr: "Vide", en: "Empty" }, ids: [] };
 
 // Données d'origine : les ajouts de l'utilisateur sont fusionnés par-dessus à chaque changement (applyCustom).
+// Ce que les fonctions de validate.js ont besoin de savoir sur les données du CV (calculé à chaque appel : CV change avec les ajouts).
+function dataContext() {
+  return {
+    levelItemIds: CV.languages.items.filter((l) => l.level).map((l) => l.id),
+    levelOptions: LANGUAGE_LEVELS,
+    listIds: BASE.lists.map((l) => l.id),
+    jobIds: BASE.experience.map((j) => j.id),
+    editBases: new Set([...collectIds(true), "subtitle", ...CV.summary.variants.map((v) => v.key)]),
+  };
+}
+
 const BASE = { summary: CV.summary, experience: CV.experience, education: CV.education, lists: CV.lists, languages: CV.languages };
 
-const DEFAULT_TITLE_COLOR = "#5b4391";
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
 
 // --- Sauvegarde locale (facultative : le CV marche sans) ---
@@ -146,7 +49,7 @@ function snapshot() {
 
 function setSaveStatus(ok) {
   state.saveFailed = !ok;
-  const status = document.getElementById("save-status");
+  const status = typeof document === "undefined" ? null : document.getElementById("save-status");
   if (status) {
     const failure = state.blocked.size > 0 ? UI_TEXT.saveBlocked : UI_TEXT.saveError;
     status.textContent = ok ? UI_TEXT.saveOk[state.lang] : failure[state.lang];
@@ -164,7 +67,7 @@ function saveStateSoon() {
 
 // Message à l'utilisateur dans une zone annoncée par les lecteurs d'écran (à la place de window.alert).
 function notify(text, isError) {
-  const zone = document.getElementById("notice");
+  const zone = typeof document === "undefined" ? null : document.getElementById("notice");
   if (!zone) return;
   zone.textContent = text;
   zone.classList.toggle("error", Boolean(isError));
@@ -175,7 +78,7 @@ function saveState() {
   saveTimer = null;
   if (state.blocked.has(STORAGE_KEY)) return setSaveStatus(false);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(fullState()));
+    storageBackend.setItem(STORAGE_KEY, JSON.stringify(fullState()));
     setSaveStatus(true);
   } catch (err) {
     console.warn("Sauvegarde locale impossible :", err);
@@ -186,7 +89,7 @@ function saveState() {
 function saveConfigs() {
   if (state.blocked.has(CONFIGS_KEY)) return setSaveStatus(false);
   try {
-    localStorage.setItem(CONFIGS_KEY, JSON.stringify(state.configs));
+    storageBackend.setItem(CONFIGS_KEY, JSON.stringify(state.configs));
     setSaveStatus(true);
   } catch (err) {
     console.warn("Sauvegarde des configurations impossible :", err);
@@ -198,7 +101,7 @@ function saveConfigs() {
 const CORRUPT_SUFFIX = "-corrompu";
 function backupRaw(key, raw) {
   try {
-    localStorage.setItem(key + CORRUPT_SUFFIX, raw);
+    storageBackend.setItem(key + CORRUPT_SUFFIX, raw);
     return true;
   } catch (err) {
     console.warn("Copie de la clé illisible impossible :", key, err);
@@ -211,7 +114,7 @@ function backupRaw(key, raw) {
 function readKey(key) {
   let raw = null;
   try {
-    raw = localStorage.getItem(key);
+    raw = storageBackend.getItem(key);
   } catch (err) {
     console.warn("Stockage local inaccessible :", err);
     return null;
@@ -231,91 +134,6 @@ function defaultLevels() {
   const levels = {};
   CV.languages.items.filter((l) => l.level).forEach((l) => { levels[l.id] = l.level; });
   return levels;
-}
-
-function validLevels(saved) {
-  const result = {};
-  if (!saved || typeof saved !== "object") return result;
-  CV.languages.items.filter((l) => l.level).forEach((l) => {
-    if (LANGUAGE_LEVELS.includes(saved[l.id])) result[l.id] = saved[l.id];
-  });
-  return result;
-}
-
-// Ne garde que des chaînes de longueur raisonnable ; objet sans prototype pour ignorer "__proto__".
-function validEdits(saved) {
-  const result = { fr: Object.create(null), en: Object.create(null) };
-  if (!saved || typeof saved !== "object") return result;
-  ["fr", "en"].forEach((lang) => {
-    Object.entries(saved[lang] || {}).forEach(([key, text]) => {
-      if (key !== "__proto__" && typeof text === "string" && text.length <= MAX_EDIT_LENGTH) result[lang][key] = text;
-    });
-  });
-  return result;
-}
-
-// Ne garde que les booléens des champs de coordonnées connus.
-// Lien GitHub saisi à la main : texte court sur une ligne, sans caractères de contrôle.
-function validGithub(value) {
-  if (typeof value !== "string") return "";
-  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, GITHUB_MAX_LENGTH);
-}
-
-function validContact(saved) {
-  const result = {};
-  if (!saved || typeof saved !== "object") return result;
-  CONTACT_FIELDS.forEach((field) => {
-    if (typeof saved[field] === "boolean") result[field] = saved[field];
-  });
-  return result;
-}
-
-// Texte d'une ligne : sans caractères de contrôle. Texte multiligne : on garde les sauts de ligne.
-const cleanLine = (value, max) => value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max);
-const cleanLines = (value, max) => value.split("\n").map((line) => cleanLine(line, max)).filter(Boolean).join("\n").slice(0, max);
-
-function validIdentity(saved) {
-  const result = { name: "", address: "", phone: "", email: "" };
-  if (!saved || typeof saved !== "object") return result;
-  IDENTITY_FIELDS.forEach((field) => {
-    if (typeof saved[field] === "string") result[field] = cleanLine(saved[field], MAX_IDENTITY_LENGTH);
-  });
-  return result;
-}
-
-// Ne garde que les ajouts bien formés (type connu, id unique, champ obligatoire, parent existant).
-function validCustom(saved) {
-  if (!Array.isArray(saved)) return [];
-  const baseListIds = BASE.lists.map((l) => l.id);
-  const seen = new Set();
-  const result = [];
-  saved.slice(0, MAX_CUSTOM).forEach((raw) => {
-    if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || typeof raw.kind !== "string") return;
-    if (!Object.hasOwn(CUSTOM_FIELDS, raw.kind) || !CUSTOM_ID.test(raw.id) || seen.has(raw.id)) return;
-    const entry = { id: raw.id, kind: raw.kind };
-    CUSTOM_FIELDS[raw.kind].forEach((field) => {
-      const multiline = raw.kind === "item" && field === "text";
-      [field, field + "En"].forEach((key) => {
-        const value = typeof raw[key] === "string" ? raw[key] : "";
-        entry[key] = multiline ? cleanLines(value, MAX_EDIT_LENGTH) : cleanLine(value, MAX_EDIT_LENGTH);
-      });
-    });
-    if (entry[CUSTOM_REQUIRED[raw.kind]] === "") return;
-    if (raw.kind === "item") {
-      if (!baseListIds.includes(raw.list)) return;
-      entry.list = raw.list;
-      entry.bullets = raw.bullets === true;
-    }
-    if (raw.kind === "bullet") {
-      const parentOk = BASE.experience.some((j) => j.id === raw.parent) || result.some((c) => c.kind === "exp" && c.id === raw.parent);
-      if (!parentOk) return;
-      entry.parent = raw.parent;
-    }
-    if (raw.kind === "lang") entry.level = raw.level === true;
-    seen.add(raw.id);
-    result.push(entry);
-  });
-  return result;
 }
 
 // Reconstruit CV.* = données d'origine + ajouts.
@@ -367,48 +185,24 @@ function applySaved(saved) {
   if ((saved.lang !== "fr" && saved.lang !== "en") || !Array.isArray(saved.checked)) return false;
   state.lang = saved.lang;
   if (saved.custom !== undefined) {
-    state.custom = validCustom(saved.custom);
+    state.custom = validCustom(saved.custom, dataContext());
     applyCustom();
   }
   const known = new Set(collectIds(true));
-  state.checked = new Set(saved.checked.filter((id) => typeof id === "string" && known.has(id)));
+  state.checked = new Set(validIds(saved.checked).filter((id) => known.has(id)));
   if (saved.identity !== undefined) state.identity = validIdentity(saved.identity);
-  state.levels = { ...defaultLevels(), ...validLevels(saved.levels) };
-  if (saved.edits !== undefined) state.edits = validEdits(saved.edits);
+  state.levels = { ...defaultLevels(), ...validLevels(saved.levels, dataContext()) };
+  if (saved.edits !== undefined) state.edits = validEdits(saved.edits, dataContext());
   if (typeof saved.showPhoto === "boolean") state.showPhoto = saved.showPhoto;
   if (typeof saved.onePage === "boolean") state.onePage = saved.onePage;
   if (typeof saved.showSubtitle === "boolean") state.showSubtitle = saved.showSubtitle;
-  if (typeof saved.titleColor === "string" && HEX_COLOR.test(saved.titleColor)) state.titleColor = saved.titleColor;
+  state.titleColor = validColor(saved.titleColor, state.titleColor);
   Object.assign(state.contact, validContact(saved.contact));
   if (saved.github !== undefined) state.github = validGithub(saved.github);
   if (CV.photos.some((p) => p.id === saved.photoChoice)) state.photoChoice = saved.photoChoice;
   if (CV.summary.variants.some((v) => v.id === saved.summaryChoice)) state.summaryChoice = saved.summaryChoice;
   if (typeof saved.photo === "string" && saved.photo.startsWith("data:image/")) state.photo = saved.photo;
   return true;
-}
-
-// Liste de configurations lue depuis le stockage ou un fichier : on ne garde que les entrées valides.
-function validConfigs(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((c) => c && typeof c.name === "string" && c.name.trim() !== "" && c.name.length <= MAX_CONFIG_NAME
-      && c.data && (c.data.lang === "fr" || c.data.lang === "en") && Array.isArray(c.data.checked))
-    .slice(0, MAX_CONFIGS)
-    .map((c) => ({ name: c.name.trim(), data: {
-      lang: c.data.lang,
-      checked: c.data.checked.filter((id) => typeof id === "string"),
-      levels: validLevels(c.data.levels),
-      showPhoto: c.data.showPhoto !== false,
-      onePage: c.data.onePage === true,
-      showSubtitle: c.data.showSubtitle !== false,
-      titleColor: typeof c.data.titleColor === "string" && HEX_COLOR.test(c.data.titleColor) ? c.data.titleColor : DEFAULT_TITLE_COLOR,
-      photoChoice: c.data.photoChoice,
-      summaryChoice: c.data.summaryChoice,
-      contact: validContact(c.data.contact),
-      github: c.data.github === undefined ? undefined : validGithub(c.data.github),
-      customItems: validCustom(c.data.customItems),
-      customPhoto: c.data.customPhoto === true,
-    } }));
 }
 
 // Chaque clé est lue séparément : une progression corrompue ne doit pas faire perdre les configurations.
@@ -418,7 +212,7 @@ function loadState() {
   const saved = readKey(STORAGE_KEY);
   const restored = applySaved(saved);
   if (saved !== null && !restored && !backupRaw(STORAGE_KEY, JSON.stringify(saved))) state.blocked.add(STORAGE_KEY);
-  state.configs = validConfigs(readKey(CONFIGS_KEY));
+  state.configs = validConfigs(readKey(CONFIGS_KEY), dataContext());
   if (!restored) applyProfile("all");
 }
 
@@ -497,7 +291,7 @@ function setupEditing() {
     const node = target(event);
     if (!node) return;
     const text = readText(node);
-    if (text === "" || text === node.dataset.original || text.length > MAX_EDIT_LENGTH) delete state.edits[state.lang][node.dataset.key];
+    if (text === "" || text === node.dataset.original || text.length > LIMITS.text) delete state.edits[state.lang][node.dataset.key];
     else state.edits[state.lang][node.dataset.key] = text;
     saveStateSoon();
   });
@@ -572,7 +366,7 @@ function refreshAll() {
 
 function saveConfig() {
   const input = document.getElementById("config-name");
-  const name = input.value.trim().slice(0, MAX_CONFIG_NAME);
+  const name = input.value.trim().slice(0, LIMITS.configName);
   if (!name) return;
   const existing = state.configs.findIndex((c) => c.name === name);
   if (existing >= 0) {
@@ -599,7 +393,7 @@ function restoreCustom(data) {
   const have = new Set(state.custom.map((c) => c.id));
   const missing = items.filter((c) => wanted.has(c.id) && !have.has(c.id));
   if (missing.length === 0) return;
-  state.custom = validCustom([...state.custom, ...missing]);
+  state.custom = validCustom([...state.custom, ...missing], dataContext());
   applyCustom();
 }
 
@@ -661,7 +455,7 @@ function applyBackup(backup) {
     state.photo = previousPhoto;
     return false;
   }
-  state.configs = validConfigs(backup.configs);
+  state.configs = validConfigs(backup.configs, dataContext());
   return true;
 }
 
@@ -736,7 +530,7 @@ function newCustomId() {
 // Ajoute un élément (coché d'office). La validation est celle du chargement : un ajout invalide est refusé.
 function addCustom(entry) {
   const id = newCustomId();
-  const next = validCustom([...state.custom, { id, ...entry }]);
+  const next = validCustom([...state.custom, { id, ...entry }], dataContext());
   if (next.length !== state.custom.length + 1) {
     window.alert(UI_TEXT.addError[state.lang]);
     return false;
@@ -794,7 +588,7 @@ function addForm(summaryLabel, fields, onAdd, hint) {
       input.className = "text-input";
       if (field.multiline) input.rows = 3;
       else input.type = "text";
-      input.maxLength = field.multiline ? MAX_EDIT_LENGTH : MAX_FIELD_LENGTH;
+      input.maxLength = field.multiline ? LIMITS.text : LIMITS.line;
       input.required = Boolean(field.required);
     }
     label.append(...(field.checkbox ? [input, el("span", "", field.label[state.lang])] : [el("span", "", field.label[state.lang]), input]));
@@ -993,12 +787,12 @@ function contactControls() {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "text-input";
-    input.maxLength = MAX_IDENTITY_LENGTH;
+    input.maxLength = LIMITS.identity;
     input.value = state.identity[field];
     input.placeholder = field === "name" ? CV.name : field === "address" ? t(CV.contact.address) : CV.contact[field];
     input.setAttribute("aria-label", UI_TEXT.contactFields[field][state.lang]);
     input.addEventListener("input", () => {
-      state.identity[field] = cleanLine(input.value, MAX_IDENTITY_LENGTH);
+      state.identity[field] = cleanLine(input.value, LIMITS.identity);
       document.title = pageTitle();
       saveState();
       renderCV();
@@ -1009,7 +803,7 @@ function contactControls() {
   const github = document.createElement("input");
   github.type = "text";
   github.className = "text-input";
-  github.maxLength = GITHUB_MAX_LENGTH;
+  github.maxLength = LIMITS.github;
   github.value = state.github;
   github.placeholder = UI_TEXT.githubPlaceholder[state.lang];
   github.addEventListener("input", () => {
@@ -1118,6 +912,7 @@ function renderToolbar() {
   document.getElementById("label-configs").textContent = UI_TEXT.configsLabel[state.lang];
   document.getElementById("configs-hint").textContent = UI_TEXT.configsHint[state.lang];
   document.getElementById("config-name").placeholder = UI_TEXT.configName[state.lang];
+  document.getElementById("config-name").maxLength = LIMITS.configName;
   document.getElementById("config-save").textContent = UI_TEXT.configSave[state.lang];
   document.getElementById("backup-export").textContent = UI_TEXT.backupExport[state.lang];
   document.getElementById("backup-import").textContent = UI_TEXT.backupImport[state.lang];
@@ -1348,4 +1143,5 @@ function init() {
   renderCV();
 }
 
-init();
+// Sans page (tests en ligne de commande ou tests.html), on ne démarre pas l'interface.
+if (typeof document !== "undefined" && document.getElementById("cv")) init();
