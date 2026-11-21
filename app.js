@@ -152,7 +152,17 @@ function setSaveStatus(ok) {
   }
 }
 
+// Sauvegarde différée pour la frappe : évite d'écrire à chaque touche, mais garantit l'écriture avant la fermeture.
+const SAVE_DELAY_MS = 500;
+let saveTimer = null;
+function saveStateSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, SAVE_DELAY_MS);
+}
+
 function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
   if (state.blocked.has(STORAGE_KEY)) return setSaveStatus(false);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(fullState()));
@@ -463,6 +473,12 @@ function setupEditing() {
     const text = readText(node);
     if (text === "" || text === node.dataset.original || text.length > MAX_EDIT_LENGTH) delete state.edits[state.lang][node.dataset.key];
     else state.edits[state.lang][node.dataset.key] = text;
+    saveStateSoon();
+  });
+
+  // Fermeture de l'onglet en pleine édition : on écrit ce qui est en attente.
+  window.addEventListener("pagehide", () => {
+    if (saveTimer !== null) saveState();
   });
 
   // Un texte vidé revient à l'original ; on sauvegarde quand on quitte le champ.
