@@ -441,7 +441,19 @@ function applyProfile(key) {
 }
 
 const isOn = (id) => state.checked.has(id);
-const t = (obj) => obj[state.lang];
+// Texte dans la langue active ; repli sur le français, puis chaîne vide, pour qu'une donnée incomplète
+// n'empêche pas d'afficher le reste du CV.
+const warnedTexts = new Set();
+function t(obj) {
+  const value = obj && obj[state.lang];
+  if (typeof value === "string") return value;
+  const warning = "Texte manquant (" + state.lang + ") : " + JSON.stringify(obj);
+  if (!warnedTexts.has(warning)) {
+    warnedTexts.add(warning);
+    console.warn(warning);
+  }
+  return obj && typeof obj.fr === "string" ? obj.fr : "";
+}
 
 // --- Petites fonctions de création de HTML (textContent : pas d'injection) ---
 function el(tag, className, text) {
