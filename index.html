@@ -16,7 +16,7 @@
 
     <div class="block">
       <p class="label" id="label-language"></p>
-      <div class="segmented" role="group">
+      <div class="segmented" role="group" aria-labelledby="label-language">
         <button type="button" data-lang="fr" aria-pressed="true">Français</button>
         <button type="button" data-lang="en" aria-pressed="false">English</button>
       </div>
@@ -40,7 +40,8 @@
         <button type="button" class="chip" id="backup-import"></button>
         <input type="file" id="backup-file" accept="application/json,.json" hidden>
       </div>
-      <p class="hint" id="save-status"></p>
+      <p class="hint" id="backup-note"></p>
+      <p class="hint" id="save-status" role="status"></p>
     </details>
 
     <details class="block fold">
@@ -54,6 +55,7 @@
     <div class="export">
       <button type="button" class="primary" id="export-btn"></button>
       <p class="hint" id="export-hint"></p>
+      <p class="error" id="fit-warning" role="status"></p>
     </div>
   </aside>
 

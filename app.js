@@ -1,5 +1,11 @@
 // Interface : cases à cocher (panneau de gauche) + rendu du CV (aperçu A4 à droite).
 
+// Les données du CV viennent de data.js : si elles manquent, on le dit au lieu d'afficher une page blanche.
+if (typeof CV === "undefined" || typeof PROFILES === "undefined" || typeof LANGUAGE_LEVELS === "undefined") {
+  showFatal("Erreur : data.js est absent ou incomplet (CV, PROFILES et LANGUAGE_LEVELS sont attendus). / data.js is missing or incomplete (CV, PROFILES and LANGUAGE_LEVELS are expected).");
+  throw new Error("data.js : CV, PROFILES ou LANGUAGE_LEVELS manquant");
+}
+
 // Le stockage est dans une variable pour que les tests puissent le remplacer (sans toucher aux vraies données).
 let storageBackend = null;
 try {
@@ -16,8 +22,8 @@ const PHOTO_QUALITY = 0.85;
 const CONFIGS_KEY = "cv-modulaire-configs-v1";
 // edits[langue][clé] = texte modifié ; la clé identifie un texte du CV (ex. "exp-dsin:title").
 const DEFAULT_LEVEL = "B2";
-// Profil vide, défini ici pour ne pas toucher aux données d'origine.
-PROFILES.empty = { label: { fr: "Vide", en: "Empty" }, ids: [] };
+// Profil « Vide » ajouté aux profils des données, sans modifier l'objet PROFILES.
+const ALL_PROFILES = { ...PROFILES, empty: { label: { fr: "Vide", en: "Empty" }, ids: [] } };
 
 // Données d'origine : les ajouts de l'utilisateur sont fusionnés par-dessus à chaque changement (applyCustom).
 // Ce que les fonctions de validate.js ont besoin de savoir sur les données du CV (calculé à chaque appel : CV change avec les ajouts).
@@ -148,6 +154,14 @@ function defaultLevels() {
   return levels;
 }
 
+// Libellé de secours d'une variante sans nom : début du texte, coupé entre deux mots.
+function shortLabel(text, max = 30) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut) + "…";
+}
+
 // Reconstruit CV.* = données d'origine + ajouts.
 function applyCustom() {
   const same = (value) => ({ fr: value, en: value });
@@ -185,7 +199,7 @@ function applyCustom() {
     ...BASE.summary,
     variants: [
       ...BASE.summary.variants,
-      ...of("summary").map((c) => ({ id: c.id, custom: true, key: "summary-" + c.id, label: optional(c, "label") || same(c.text.slice(0, 30)), text: pair(c, "text") })),
+      ...of("summary").map((c) => ({ id: c.id, custom: true, key: "summary-" + c.id, label: optional(c, "label") || same(shortLabel(c.text)), text: pair(c, "text") })),
     ],
   };
 }
@@ -256,7 +270,7 @@ function collectIds(withFlagged) {
 const allIds = () => collectIds(false);
 
 function applyProfile(key) {
-  const profile = PROFILES[key];
+  const profile = ALL_PROFILES[key];
   state.checked = new Set(profile.ids === "all" ? allIds() : profile.ids);
 }
 
@@ -294,10 +308,14 @@ function textWithBreaks(parent, text) {
 const hasEdit = (key) => Object.hasOwn(state.edits[state.lang], key);
 
 // Crée un élément dont le texte peut être modifié directement dans le CV.
-function editable(tag, className, key, original) {
+// `name` : clé de UI_TEXT.editNames, pour le nom accessible (lecteurs d'écran).
+function editable(tag, className, key, original, name) {
   const node = el(tag, (className ? className + " " : "") + "edit");
   textWithBreaks(node, hasEdit(key) ? state.edits[state.lang][key] : original);
   node.contentEditable = "true";
+  node.tabIndex = 0; // accessible au clavier (Tab), puis on tape directement
+  node.setAttribute("role", "textbox");
+  node.setAttribute("aria-label", UI_TEXT.editNames[name][state.lang]);
   node.dataset.key = key;
   node.dataset.original = original;
   return node;
@@ -316,7 +334,7 @@ function setupEditing() {
   cv.addEventListener("input", (event) => {
     const node = target(event);
     if (!node) return;
-    const text = readText(node);
+    const text = cleanEdit(readText(node)).trim();
     if (text === "" || text === node.dataset.original || text.length > LIMITS.text) delete state.edits[state.lang][node.dataset.key];
     else state.edits[state.lang][node.dataset.key] = text;
     saveStateSoon();
@@ -373,13 +391,12 @@ function renderConfigs() {
   state.configs.forEach((config, index) => {
     const item = el("li", "config-item");
     item.appendChild(el("span", "config-name", config.name));
-    const load = el("button", "chip", UI_TEXT.configLoad[state.lang]);
-    load.type = "button";
-    load.addEventListener("click", () => loadConfig(index));
-    const del = el("button", "chip", UI_TEXT.configDelete[state.lang]);
-    del.type = "button";
-    del.addEventListener("click", () => deleteConfig(index));
-    item.append(load, del);
+    const load = UI_TEXT.configLoad[state.lang];
+    const del = UI_TEXT.configDelete[state.lang];
+    item.append(
+      chip(load, () => loadConfig(index), { label: load + " : " + config.name }),
+      chip(del, () => deleteConfig(index), { label: del + " : " + config.name }),
+    );
     list.appendChild(item);
   });
 }
@@ -400,7 +417,7 @@ function saveConfig() {
     state.configs[existing].data = snapshot();
   } else {
     if (state.configs.length >= MAX_CONFIGS) {
-      window.alert(UI_TEXT.configFull[state.lang]);
+      notify(UI_TEXT.configFull[state.lang], true);
       return;
     }
     state.configs.push({ name, data: snapshot() });
@@ -517,24 +534,75 @@ function setupConfigs() {
 }
 
 // --- Panneau de contrôle ---
-function checkbox(id, label, extraClass, flag) {
-  const wrapper = el("label", "check " + (extraClass || ""));
+// Les contrôles sont construits par renderControls (quand la structure change : langue, ajout, suppression,
+// chargement d'une configuration). Quand seul l'état change (case cochée, profil, photo...), syncControls
+// met simplement à jour les cases, les boutons grisés et les états « pressé » : rien n'est reconstruit,
+// donc les blocs ouverts et les textes en cours de saisie restent en place.
+const syncers = [];
+const onSync = (fn) => { fn(); syncers.push(fn); };
+const syncControls = () => syncers.forEach((sync) => sync());
+
+// Bouton arrondi. `opts.pressed` / `opts.disabled` : fonctions relues à chaque syncControls ; `opts.label` : nom accessible.
+function chip(text, onClick, opts = {}) {
+  const btn = el("button", "chip", text);
+  btn.type = "button";
+  if (opts.label) btn.setAttribute("aria-label", opts.label);
+  btn.addEventListener("click", onClick);
+  if (opts.pressed || opts.disabled) {
+    onSync(() => {
+      if (opts.pressed) btn.setAttribute("aria-pressed", String(opts.pressed()));
+      if (opts.disabled) btn.disabled = opts.disabled();
+    });
+  }
+  return btn;
+}
+
+// Case à cocher : `get` lit l'état, `set` l'écrit. `opts` : className, flag (mention « à confirmer »), enabled (fonction).
+function checkbox(label, get, set, opts = {}) {
+  const wrapper = el("label", opts.className ? "check " + opts.className : "check");
   const input = document.createElement("input");
   input.type = "checkbox";
-  input.checked = isOn(id);
-  input.addEventListener("change", () => {
-    if (input.checked) state.checked.add(id);
+  input.addEventListener("change", () => set(input.checked));
+  wrapper.append(input, el("span", "", label));
+  if (opts.flag) wrapper.appendChild(el("em", "badge", UI_TEXT.flagged[state.lang] + " : " + t(opts.flag)));
+  onSync(() => {
+    input.checked = get();
+    input.disabled = opts.enabled ? !opts.enabled() : false;
+  });
+  return wrapper;
+}
+
+// Case liée à un élément du CV (son id est dans state.checked).
+function itemCheckbox(id, label, opts) {
+  return checkbox(label, () => isOn(id), (on) => {
+    if (on) state.checked.add(id);
     else state.checked.delete(id);
     saveState();
     renderCV();
-    renderControls();
-  });
-  wrapper.append(input, el("span", "", label));
-  if (flag) {
-    const badge = el("em", "badge", UI_TEXT.flagged[state.lang] + " : " + t(flag));
-    wrapper.appendChild(badge);
-  }
-  return wrapper;
+    syncControls();
+  }, opts);
+}
+
+// Case liée à un booléen de l'état (target[key]).
+function stateCheckbox(label, target, key, opts) {
+  return checkbox(label, () => target[key], (on) => {
+    target[key] = on;
+    saveState();
+    renderCV();
+    syncControls();
+  }, opts);
+}
+
+function textInput({ value, max, label, placeholder, onInput }) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "text-input";
+  input.maxLength = max;
+  input.value = value;
+  if (placeholder) input.placeholder = placeholder;
+  input.setAttribute("aria-label", label);
+  input.addEventListener("input", () => onInput(input.value));
+  return input;
 }
 
 function group(title) {
@@ -545,7 +613,8 @@ function group(title) {
 
 // --- Ajout et suppression d'éléments par l'utilisateur ---
 function pageTitle() {
-  return "CV - " + (state.identity.name || CV.name) + " - " + state.lang.toUpperCase();
+  const lang = state.lang;
+  return SEPARATORS.pageTitle[lang] + (state.identity.name || CV.name) + SEPARATORS.pageTitleLang[lang] + lang.toUpperCase();
 }
 
 function newCustomId() {
@@ -554,14 +623,14 @@ function newCustomId() {
   return id;
 }
 
+// Formulaire qui vient d'être validé : on ne lui rend pas ses anciennes valeurs après la reconstruction.
+let submittedForm = null;
+
 // Ajoute un élément (coché d'office). La validation est celle du chargement : un ajout invalide est refusé.
 function addCustom(entry) {
   const id = newCustomId();
   const next = validCustom([...state.custom, { id, ...entry }], dataContext());
-  if (next.length !== state.custom.length + 1) {
-    window.alert(UI_TEXT.addError[state.lang]);
-    return false;
-  }
+  if (next.length !== state.custom.length + 1) return false;
   state.custom = next;
   applyCustom();
   state.checked.add(id);
@@ -591,31 +660,32 @@ function removeCustom(id) {
 }
 
 // Bouton « Supprimer », seulement sur les éléments ajoutés (les données d'origine se décochent).
-function removeButton(id) {
-  const btn = el("button", "chip", UI_TEXT.remove[state.lang]);
-  btn.type = "button";
-  btn.addEventListener("click", (event) => {
+// Le nom de l'élément est dans le nom accessible : sinon tous les boutons s'appellent « Supprimer ».
+function removeButton(id, name) {
+  const label = UI_TEXT.remove[state.lang];
+  return chip(label, (event) => {
     event.preventDefault();
     removeCustom(id);
-  });
-  return btn;
+  }, { label: label + " : " + name });
 }
 
-// Formulaire repliable. `fields` : { name, label, required?, multiline?, checkbox? } ; `onAdd` reçoit { name: valeur }.
-function addForm(summaryLabel, fields, onAdd, hint) {
+// Formulaire repliable. `key` identifie le formulaire quand le panneau est reconstruit.
+// `fields` : { name, label, type, required?, textarea?, checkbox? } ; `onAdd` reçoit { name: valeur } et renvoie false si l'ajout est refusé.
+function addForm(key, summaryLabel, fields, onAdd, hint) {
   const box = el("details", "add");
+  box.dataset.form = key;
   box.appendChild(el("summary", "chip", summaryLabel));
   const form = document.createElement("form");
   const inputs = {};
   fields.forEach((field) => {
     const label = el("label", field.checkbox ? "check" : "field");
-    const input = document.createElement(field.multiline ? "textarea" : "input");
+    const input = document.createElement(field.textarea ? "textarea" : "input");
     if (field.checkbox) input.type = "checkbox";
     else {
       input.className = "text-input";
-      if (field.multiline) input.rows = 3;
+      if (field.textarea) input.rows = 3;
       else input.type = "text";
-      input.maxLength = field.multiline ? LIMITS.text : LIMITS.line;
+      input.maxLength = FIELD_TYPES[field.type].max;
       input.required = Boolean(field.required);
     }
     label.append(...(field.checkbox ? [input, el("span", "", field.label[state.lang])] : [el("span", "", field.label[state.lang]), input]));
@@ -623,20 +693,47 @@ function addForm(summaryLabel, fields, onAdd, hint) {
     inputs[field.name] = input;
   });
   if (hint) form.appendChild(el("p", "hint", hint));
+  const error = el("p", "error");
+  error.setAttribute("role", "alert");
   const submit = el("button", "chip", UI_TEXT.addSubmit[state.lang]);
   submit.type = "submit";
-  form.appendChild(submit);
+  form.append(error, submit);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const values = {};
     fields.forEach((field) => { values[field.name] = field.checkbox ? inputs[field.name].checked : inputs[field.name].value; });
-    onAdd(values);
+    submittedForm = key;
+    const ok = onAdd(values);
+    submittedForm = null;
+    error.textContent = ok ? "" : UI_TEXT.addError[state.lang];
   });
   box.appendChild(form);
   return box;
 }
 
-const FIELD = (name, required, multiline) => ({ name, label: UI_TEXT.fields[name], required, multiline });
+// Avant de reconstruire le panneau : état ouvert/fermé et valeurs saisies de chaque formulaire d'ajout.
+function captureForms(panel) {
+  const saved = new Map();
+  panel.querySelectorAll("details.add[data-form]").forEach((box) => {
+    const fields = [...box.querySelectorAll("input, textarea")];
+    saved.set(box.dataset.form, { open: box.open, values: fields.map((f) => (f.type === "checkbox" ? f.checked : f.value)) });
+  });
+  return saved;
+}
+
+function restoreForms(panel, saved, skipKey) {
+  panel.querySelectorAll("details.add[data-form]").forEach((box) => {
+    const previous = saved.get(box.dataset.form);
+    if (!previous || box.dataset.form === skipKey) return;
+    box.open = previous.open;
+    [...box.querySelectorAll("input, textarea")].forEach((f, i) => {
+      if (f.type === "checkbox") f.checked = previous.values[i];
+      else f.value = previous.values[i];
+    });
+  });
+}
+
+const FIELD = (name, required, type = "line", textarea = false) => ({ name, label: UI_TEXT.fields[name], required, type, textarea });
 
 // Curseur de niveau : ne reconstruit que le CV, pour ne pas perdre le focus pendant le glissement.
 function levelSlider(item, enabled) {
@@ -646,17 +743,25 @@ function levelSlider(item, enabled) {
   slider.min = "0";
   slider.max = String(LANGUAGE_LEVELS.length - 1);
   slider.step = "1";
-  slider.value = String(LANGUAGE_LEVELS.indexOf(state.levels[item.id]));
-  slider.disabled = !enabled;
   slider.setAttribute("aria-label", t(item.text));
-  const value = el("span", "level-value", state.levels[item.id]);
+  const value = el("span", "level-value");
+  const show = () => {
+    const level = state.levels[item.id];
+    slider.value = String(LANGUAGE_LEVELS.indexOf(level));
+    slider.setAttribute("aria-valuetext", level); // « B2 » plutôt que « 1 »
+    value.textContent = level;
+  };
   slider.addEventListener("input", () => {
     state.levels[item.id] = LANGUAGE_LEVELS[Number(slider.value)];
-    value.textContent = state.levels[item.id];
-    saveState();
+    show();
+    saveStateSoon();
     renderCV();
   });
   wrapper.append(el("span", "level-end", LANGUAGE_LEVELS[0]), slider, el("span", "level-end", LANGUAGE_LEVELS[LANGUAGE_LEVELS.length - 1]), value);
+  onSync(() => {
+    slider.disabled = !enabled();
+    show();
+  });
   return wrapper;
 }
 
@@ -703,74 +808,39 @@ function readPhoto(file) {
 
 function layoutControls() {
   const box = group(UI_TEXT.layout[state.lang]);
-  const label = el("label", "check");
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.checked = state.onePage;
-  input.addEventListener("change", () => {
-    state.onePage = input.checked;
-    saveState();
-    renderCV();
-  });
-  label.append(input, el("span", "", UI_TEXT.onePage[state.lang]));
-  box.appendChild(label);
-
-  const subtitle = el("label", "check");
-  const subtitleInput = document.createElement("input");
-  subtitleInput.type = "checkbox";
-  subtitleInput.checked = state.showSubtitle;
-  subtitleInput.addEventListener("change", () => {
-    state.showSubtitle = subtitleInput.checked;
-    saveState();
-    renderCV();
-  });
-  subtitle.append(subtitleInput, el("span", "", UI_TEXT.subtitle[state.lang]));
-  box.appendChild(subtitle);
+  box.appendChild(stateCheckbox(UI_TEXT.onePage[state.lang], state, "onePage"));
+  box.appendChild(stateCheckbox(UI_TEXT.subtitle[state.lang], state, "showSubtitle"));
 
   const color = el("label", "check");
   const picker = document.createElement("input");
   picker.type = "color";
-  picker.value = state.titleColor;
   picker.addEventListener("input", () => {
     state.titleColor = picker.value;
-    saveState();
+    saveStateSoon();
     renderCV();
   });
-  const reset = el("button", "chip", UI_TEXT.resetColor[state.lang]);
-  reset.type = "button";
-  reset.addEventListener("click", () => {
+  const reset = chip(UI_TEXT.resetColor[state.lang], () => {
     state.titleColor = DEFAULT_TITLE_COLOR;
-    picker.value = DEFAULT_TITLE_COLOR;
     saveState();
     renderCV();
+    syncControls();
   });
   color.append(picker, el("span", "", UI_TEXT.titleColor[state.lang]), reset);
+  onSync(() => { picker.value = state.titleColor; });
   box.appendChild(color);
   return box;
 }
 
 function photoControls() {
   const box = group(UI_TEXT.photo[state.lang]);
+  box.appendChild(stateCheckbox(UI_TEXT.showPhoto[state.lang], state, "showPhoto"));
 
-  const toggle = el("label", "check");
-  const show = document.createElement("input");
-  show.type = "checkbox";
-  show.checked = state.showPhoto;
-  show.addEventListener("change", () => {
-    state.showPhoto = show.checked;
-    saveState();
-    renderControls();
-    renderCV();
-  });
-  toggle.append(show, el("span", "", UI_TEXT.showPhoto[state.lang]));
-  box.appendChild(toggle);
-
-  const actions = el("div", "photo-actions");
+  const message = el("p", "error");
+  message.setAttribute("role", "alert");
   const file = document.createElement("input");
   file.type = "file";
   file.accept = PHOTO_TYPES.join(",");
   file.hidden = true;
-  const message = el("p", "error");
   file.addEventListener("change", async () => {
     message.textContent = "";
     if (!file.files[0]) return;
@@ -778,36 +848,29 @@ function photoControls() {
       state.photo = await readPhoto(file.files[0]);
       savePhoto();
       saveState();
-      renderControls();
       renderCV();
+      syncControls();
     } catch (err) {
       console.warn("Import de photo impossible :", err);
       message.textContent = photoErrorText(err);
     }
     file.value = "";
   });
-  const importBtn = el("button", "chip", UI_TEXT.importPhoto[state.lang]);
-  importBtn.type = "button";
-  importBtn.disabled = !state.showPhoto;
-  importBtn.addEventListener("click", () => file.click());
-  actions.append(importBtn, file);
+  const noPhoto = () => !state.showPhoto;
+  const actions = el("div", "photo-actions");
+  actions.append(chip(UI_TEXT.importPhoto[state.lang], () => file.click(), { disabled: noPhoto }), file);
 
   // Photos fournies : en choisir une remplace la photo importée.
   const choices = el("div", "photo-actions");
   CV.photos.forEach((photo) => {
-    const btn = el("button", "chip", t(photo.label));
-    btn.type = "button";
-    btn.disabled = !state.showPhoto;
-    btn.setAttribute("aria-pressed", String(!state.photo && state.photoChoice === photo.id));
-    btn.addEventListener("click", () => {
+    choices.appendChild(chip(t(photo.label), () => {
       state.photoChoice = photo.id;
       state.photo = null;
       savePhoto();
       saveState();
-      renderControls();
       renderCV();
-    });
-    choices.appendChild(btn);
+      syncControls();
+    }, { disabled: noPhoto, pressed: () => !state.photo && state.photoChoice === photo.id }));
   });
   box.append(el("p", "label", UI_TEXT.photoChoices[state.lang]), choices, actions, message);
   return box;
@@ -816,179 +879,179 @@ function photoControls() {
 function contactControls() {
   const box = group(UI_TEXT.contactLabel[state.lang]);
   CONTACT_FIELDS.forEach((field) => {
-    const label = el("label", "check");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = state.contact[field];
-    input.addEventListener("change", () => {
-      state.contact[field] = input.checked;
-      saveState();
-      renderControls();
-      renderCV();
-    });
-    label.append(input, el("span", "", UI_TEXT.contactFields[field][state.lang]));
-    box.appendChild(label);
+    box.appendChild(stateCheckbox(UI_TEXT.contactFields[field][state.lang], state.contact, field));
   });
 
   IDENTITY_FIELDS.forEach((field) => {
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "text-input";
-    input.maxLength = LIMITS.identity;
-    input.value = state.identity[field];
-    input.placeholder = field === "name" ? CV.name : field === "address" ? t(CV.contact.address) : CV.contact[field];
-    input.setAttribute("aria-label", UI_TEXT.contactFields[field][state.lang]);
-    input.addEventListener("input", () => {
-      state.identity[field] = cleanLine(input.value, LIMITS.identity);
-      document.title = pageTitle();
+    box.appendChild(textInput({
+      value: state.identity[field],
+      max: LIMITS.identity,
+      label: UI_TEXT.contactFields[field][state.lang],
+      placeholder: field === "name" ? CV.name : field === "address" ? t(CV.contact.address) : CV.contact[field],
+      onInput: (value) => {
+        state.identity[field] = cleanLine(value, LIMITS.identity);
+        document.title = pageTitle();
+        saveStateSoon();
+        renderCV();
+      },
+    }));
+  });
+  box.appendChild(textInput({
+    value: state.github,
+    max: LIMITS.github,
+    label: UI_TEXT.contactFields.github[state.lang],
+    placeholder: UI_TEXT.githubPlaceholder[state.lang],
+    onInput: (value) => {
+      state.github = validGithub(value);
+      saveStateSoon();
+      renderCV();
+    },
+  }));
+
+  const anyShown = () => CONTACT_FIELDS.some((field) => state.contact[field]);
+  const toggle = chip("", () => {
+    const show = !anyShown();
+    CONTACT_FIELDS.forEach((field) => { state.contact[field] = show; });
+    saveState();
+    renderCV();
+    syncControls();
+  });
+  onSync(() => { toggle.textContent = (anyShown() ? UI_TEXT.hideContact : UI_TEXT.showContact)[state.lang]; });
+  box.appendChild(el("div", "options")).appendChild(toggle);
+  return box;
+}
+
+function summaryControls() {
+  const summary = group(UI_TEXT.sections.summary[state.lang]);
+  summary.appendChild(itemCheckbox(CV.summary.id, UI_TEXT.sections.summary[state.lang]));
+  const variants = el("div", "options");
+  CV.summary.variants.forEach((variant) => {
+    variants.appendChild(chip(t(variant.label), () => {
+      state.summaryChoice = variant.id;
       saveState();
       renderCV();
+      syncControls();
+    }, { disabled: () => !isOn(CV.summary.id), pressed: () => state.summaryChoice === variant.id }));
+    if (variant.custom) variants.appendChild(removeButton(variant.id, t(variant.label)));
+  });
+  summary.append(el("p", "label", UI_TEXT.summaryText[state.lang]), variants);
+  const fields = [{ ...FIELD("variantLabel", true), name: "label" }, { ...FIELD("summaryText", true, "long", true), name: "text" }];
+  const hint = UI_TEXT.addHint[state.lang] + " " + UI_TEXT.singleLineHint[state.lang];
+  summary.appendChild(addForm("summary", UI_TEXT.add[state.lang], fields, (v) => addCustom({ kind: "summary", label: v.label, text: v.text }), hint));
+  return summary;
+}
+
+function experienceControls() {
+  const exp = group(UI_TEXT.sections.experience[state.lang]);
+  CV.experience.forEach((job) => {
+    const jobBox = itemCheckbox(job.id, t(job.title), { className: "parent", flag: job.flag });
+    if (job.custom) jobBox.appendChild(removeButton(job.id, t(job.title)));
+    exp.appendChild(jobBox);
+    job.bullets.forEach((b) => {
+      const box = itemCheckbox(b.id, t(b.text), { className: "child", enabled: () => isOn(job.id) });
+      if (b.custom) box.appendChild(removeButton(b.id, t(b.text)));
+      exp.appendChild(box);
     });
-    box.appendChild(input);
+    exp.appendChild(addForm("bullet-" + job.id, UI_TEXT.addBullet[state.lang], [{ ...FIELD("bulletText", true, "long"), name: "text" }], (v) => addCustom({ kind: "bullet", parent: job.id, text: v.text }), UI_TEXT.singleLineHint[state.lang]));
   });
+  exp.appendChild(addForm("exp", UI_TEXT.add[state.lang], [FIELD("title", true), FIELD("org"), FIELD("dates")], (v) => addCustom({ kind: "exp", ...v }), UI_TEXT.addHint[state.lang]));
+  return exp;
+}
 
-  const github = document.createElement("input");
-  github.type = "text";
-  github.className = "text-input";
-  github.maxLength = LIMITS.github;
-  github.value = state.github;
-  github.placeholder = UI_TEXT.githubPlaceholder[state.lang];
-  github.addEventListener("input", () => {
-    state.github = validGithub(github.value);
-    saveState();
-    renderCV();
+function educationControls() {
+  const edu = group(UI_TEXT.sections.education[state.lang]);
+  CV.education.forEach((e) => {
+    const box = itemCheckbox(e.id, t(e.title));
+    if (e.custom) box.appendChild(removeButton(e.id, t(e.title)));
+    edu.appendChild(box);
   });
-  box.appendChild(github);
+  edu.appendChild(addForm("edu", UI_TEXT.add[state.lang], [FIELD("title", true), FIELD("org"), FIELD("dates"), FIELD("detail", false, "long")], (v) => addCustom({ kind: "edu", ...v }), UI_TEXT.addHint[state.lang]));
+  return edu;
+}
 
-  const anyShown = CONTACT_FIELDS.some((field) => state.contact[field]);
-  const toggle = el("button", "chip", (anyShown ? UI_TEXT.hideContact : UI_TEXT.showContact)[state.lang]);
-  toggle.type = "button";
-  toggle.addEventListener("click", () => {
-    CONTACT_FIELDS.forEach((field) => { state.contact[field] = !anyShown; });
-    saveState();
-    renderControls();
-    renderCV();
+function listControls(list) {
+  const box = group(t(list.title));
+  list.items.forEach((item) => {
+    const itemBox = itemCheckbox(item.id, t(item.label), { flag: item.flag });
+    if (item.custom) itemBox.appendChild(removeButton(item.id, t(item.label)));
+    box.appendChild(itemBox);
   });
-  box.appendChild(el("div", "options", "")).appendChild(toggle);
+  const hint = UI_TEXT.addHint[state.lang] + " " + UI_TEXT.multilineHint[state.lang];
+  box.appendChild(addForm("list-" + list.id, UI_TEXT.add[state.lang], [FIELD("label", true), FIELD("dates"), FIELD("text", false, "multiline", true)], (v) => addCustom({ kind: "item", list: list.id, ...v }), hint));
   return box;
+}
+
+function languageControls() {
+  const langs = group(UI_TEXT.sections.languages[state.lang]);
+  const enabled = () => isOn(CV.languages.id);
+  langs.appendChild(itemCheckbox(CV.languages.id, t(CV.labels.languages), { className: "parent" }));
+  CV.languages.items.forEach((l) => {
+    const box = itemCheckbox(l.id, t(l.text), { className: "child", enabled });
+    if (l.custom) box.appendChild(removeButton(l.id, t(l.text)));
+    langs.appendChild(box);
+    if (l.level) langs.appendChild(levelSlider(l, () => enabled() && isOn(l.id)));
+  });
+  const fields = [{ ...FIELD("language", true), name: "text" }, { name: "level", label: UI_TEXT.fields.level, checkbox: true }];
+  langs.appendChild(addForm("lang", UI_TEXT.add[state.lang], fields, (v) => addCustom({ kind: "lang", ...v }), UI_TEXT.addHint[state.lang]));
+  return langs;
 }
 
 function renderControls() {
   const panel = document.getElementById("controls");
+  const scroller = panel.closest(".sidebar");
+  const scrollTop = scroller.scrollTop;
+  const forms = captureForms(panel);
+  syncers.length = 0;
   panel.replaceChildren();
 
   panel.appendChild(el("h2", "", UI_TEXT.content[state.lang]));
-  panel.appendChild(layoutControls());
-  panel.appendChild(photoControls());
-  panel.appendChild(contactControls());
+  panel.append(layoutControls(), photoControls(), contactControls(), summaryControls(), experienceControls(), educationControls());
+  CV.lists.forEach((list) => panel.appendChild(listControls(list)));
+  panel.appendChild(languageControls());
 
-  const summary = group(UI_TEXT.sections.summary[state.lang]);
-  summary.appendChild(checkbox(CV.summary.id, UI_TEXT.sections.summary[state.lang]));
-  const variants = el("div", "options");
-  CV.summary.variants.forEach((variant) => {
-    const btn = el("button", "chip", t(variant.label));
-    btn.type = "button";
-    btn.disabled = !isOn(CV.summary.id);
-    btn.setAttribute("aria-pressed", String(state.summaryChoice === variant.id));
-    btn.addEventListener("click", () => {
-      state.summaryChoice = variant.id;
-      saveState();
-      renderControls();
-      renderCV();
-    });
-    variants.appendChild(btn);
-    if (variant.custom) variants.appendChild(removeButton(variant.id));
-  });
-  summary.append(el("p", "label", UI_TEXT.summaryText[state.lang]), variants);
-  summary.appendChild(addForm(UI_TEXT.add[state.lang], [FIELD("summaryText", true, true)], (v) => addCustom({ kind: "summary", text: v.summaryText }), UI_TEXT.addHint[state.lang]));
-  panel.appendChild(summary);
-
-  const exp = group(UI_TEXT.sections.experience[state.lang]);
-  CV.experience.forEach((job) => {
-    const jobBox = checkbox(job.id, t(job.title), "parent", job.flag);
-    if (job.custom) jobBox.appendChild(removeButton(job.id));
-    exp.appendChild(jobBox);
-    job.bullets.forEach((b) => {
-      const box = checkbox(b.id, t(b.text), "child");
-      box.querySelector("input").disabled = !isOn(job.id);
-      if (b.custom) box.appendChild(removeButton(b.id));
-      exp.appendChild(box);
-    });
-    exp.appendChild(addForm(UI_TEXT.addBullet[state.lang], [{ ...FIELD("bulletText", true), name: "text" }], (v) => addCustom({ kind: "bullet", parent: job.id, text: v.text })));
-  });
-  exp.appendChild(addForm(UI_TEXT.add[state.lang], [FIELD("title", true), FIELD("org"), FIELD("dates")], (v) => addCustom({ kind: "exp", ...v }), UI_TEXT.addHint[state.lang]));
-  panel.appendChild(exp);
-
-  const edu = group(UI_TEXT.sections.education[state.lang]);
-  CV.education.forEach((e) => {
-    const box = checkbox(e.id, t(e.title));
-    if (e.custom) box.appendChild(removeButton(e.id));
-    edu.appendChild(box);
-  });
-  edu.appendChild(addForm(UI_TEXT.add[state.lang], [FIELD("title", true), FIELD("org"), FIELD("dates"), FIELD("detail")], (v) => addCustom({ kind: "edu", ...v }), UI_TEXT.addHint[state.lang]));
-  panel.appendChild(edu);
-
-  CV.lists.forEach((list) => {
-    const box = group(t(list.title));
-    list.items.forEach((item) => {
-      const itemBox = checkbox(item.id, t(item.label), "", item.flag);
-      if (item.custom) itemBox.appendChild(removeButton(item.id));
-      box.appendChild(itemBox);
-    });
-    box.appendChild(addForm(UI_TEXT.add[state.lang], [FIELD("label", true), FIELD("dates"), FIELD("text", false, true)], (v) => addCustom({ kind: "item", list: list.id, ...v }), UI_TEXT.addHint[state.lang] + " " + UI_TEXT.multilineHint[state.lang]));
-    panel.appendChild(box);
-  });
-
-  const langs = group(UI_TEXT.sections.languages[state.lang]);
-  langs.appendChild(checkbox(CV.languages.id, t(CV.labels.languages), "parent"));
-  CV.languages.items.forEach((l) => {
-    const box = checkbox(l.id, t(l.text), "child");
-    const enabled = isOn(CV.languages.id);
-    box.querySelector("input").disabled = !enabled;
-    if (l.custom) box.appendChild(removeButton(l.id));
-    langs.appendChild(box);
-    if (l.level) langs.appendChild(levelSlider(l, enabled && isOn(l.id)));
-  });
-  langs.appendChild(addForm(UI_TEXT.add[state.lang], [{ ...FIELD("language", true), name: "text" }, { name: "level", label: UI_TEXT.fields.level, checkbox: true }], (v) => addCustom({ kind: "lang", ...v }), UI_TEXT.addHint[state.lang]));
-  panel.appendChild(langs);
+  restoreForms(panel, forms, submittedForm);
+  scroller.scrollTop = scrollTop;
 }
 
 function renderToolbar() {
-  document.getElementById("label-language").textContent = UI_TEXT.language[state.lang];
-  document.getElementById("label-profiles").textContent = UI_TEXT.profiles[state.lang];
-  document.getElementById("label-configs").textContent = UI_TEXT.configsLabel[state.lang];
-  document.getElementById("configs-hint").textContent = UI_TEXT.configsHint[state.lang];
-  document.getElementById("config-name").placeholder = UI_TEXT.configName[state.lang];
-  document.getElementById("config-name").maxLength = LIMITS.configName;
-  document.getElementById("config-save").textContent = UI_TEXT.configSave[state.lang];
-  document.getElementById("backup-export").textContent = UI_TEXT.backupExport[state.lang];
-  document.getElementById("backup-import").textContent = UI_TEXT.backupImport[state.lang];
+  const lang = state.lang;
+  const setText = (id, text) => { document.getElementById(id).textContent = text; };
+  setText("label-language", UI_TEXT.language[lang]);
+  setText("label-profiles", UI_TEXT.profiles[lang]);
+  setText("label-configs", UI_TEXT.configsLabel[lang]);
+  setText("configs-hint", UI_TEXT.configsHint[lang]);
+  setText("config-save", UI_TEXT.configSave[lang]);
+  setText("backup-export", UI_TEXT.backupExport[lang]);
+  setText("backup-import", UI_TEXT.backupImport[lang]);
+  setText("backup-note", UI_TEXT.backupNote[lang]);
+  setText("label-edit", UI_TEXT.editLabel[lang]);
+  setText("edit-hint", UI_TEXT.editHint[lang]);
+  setText("reset-texts", UI_TEXT.resetTexts[lang]);
+  setText("export-btn", UI_TEXT.export[lang]);
+  setText("export-hint", UI_TEXT.hint[lang]);
+  const configName = document.getElementById("config-name");
+  configName.placeholder = UI_TEXT.configName[lang];
+  configName.setAttribute("aria-label", UI_TEXT.configName[lang]);
+  configName.maxLength = LIMITS.configName;
   setSaveStatus(!state.saveFailed);
   renderConfigs();
-  document.getElementById("label-edit").textContent = UI_TEXT.editLabel[state.lang];
-  document.getElementById("edit-hint").textContent = UI_TEXT.editHint[state.lang];
-  document.getElementById("reset-texts").textContent = UI_TEXT.resetTexts[state.lang];
-  document.getElementById("export-btn").textContent = UI_TEXT.export[state.lang];
-  document.getElementById("export-hint").textContent = UI_TEXT.hint[state.lang];
-  document.documentElement.lang = state.lang;
+  document.documentElement.lang = lang;
   document.title = pageTitle();
 
   document.querySelectorAll("[data-lang]").forEach((btn) => {
-    btn.setAttribute("aria-pressed", String(btn.dataset.lang === state.lang));
+    btn.setAttribute("aria-pressed", String(btn.dataset.lang === lang));
   });
 
+  // Un profil est une action (il coche un lot d'éléments), pas un état : pas d'aria-pressed.
   const profileBox = document.getElementById("profiles");
   profileBox.replaceChildren();
-  Object.keys(PROFILES).forEach((key) => {
-    const btn = el("button", "chip", t(PROFILES[key].label));
-    btn.type = "button";
-    btn.addEventListener("click", () => {
+  Object.keys(ALL_PROFILES).forEach((key) => {
+    profileBox.appendChild(chip(t(ALL_PROFILES[key].label), () => {
       applyProfile(key);
       saveState();
-      renderControls();
       renderCV();
-    });
-    profileBox.appendChild(btn);
+      syncControls();
+    }));
   });
 }
 
@@ -1004,15 +1067,20 @@ function row(titleNode, datesNode, orgNode) {
 
 // Dates modifiables, ou cellule vide si l'élément n'a pas de dates.
 function datesNode(key, dates) {
-  return dates ? editable("span", "dates", key, dates) : el("span", "dates");
+  return dates ? editable("span", "dates", key, dates, "dates") : el("span", "dates");
 }
 
 // Structure et lieu sur la même ligne que l'intitulé (même modèle pour expériences et études).
 function orgInline(item) {
   if (!item.org) return null;
   const wrap = el("span", "org");
-  wrap.append(document.createTextNode(" - "), editable("span", "", item.id + ":org", t(item.org)));
+  wrap.append(document.createTextNode(SEPARATORS.org[state.lang]), editable("span", "", item.id + ":org", t(item.org), "org"));
   return wrap;
+}
+
+// Ligne commune aux expériences et aux études : intitulé, structure, dates.
+function entryRow(item) {
+  return row(editable("span", "", item.id + ":title", t(item.title), "title"), datesNode(item.id + ":dates", item.dates ? t(item.dates) : ""), orgInline(item));
 }
 
 function renderHeader(cv) {
@@ -1021,27 +1089,28 @@ function renderHeader(cv) {
   const showPhoto = state.showPhoto && Boolean(photoSrc);
   const header = el("header", showPhoto ? "cv-header" : "cv-header no-photo");
   const identity = el("div", "identity");
-  identity.appendChild(el("h1", "", state.identity.name || CV.name));
-  if (state.showSubtitle) identity.appendChild(editable("p", "subtitle", "subtitle", t(CV.subtitle)));
+  const name = state.identity.name || CV.name;
+  identity.appendChild(el("h1", "", name));
+  if (state.showSubtitle) identity.appendChild(editable("p", "subtitle", "subtitle", t(CV.subtitle), "subtitle"));
   const contactParts = [
     state.contact.address && (state.identity.address || t(CV.contact.address)),
     state.contact.phone && (state.identity.phone || CV.contact.phone),
     state.contact.email && (state.identity.email || CV.contact.email),
     state.contact.github && state.github && state.github.replace(/^https?:\/\//, ""),
   ].filter(Boolean);
-  if (contactParts.length > 0) identity.appendChild(el("p", "contact", contactParts.join(" • ")));
+  if (contactParts.length > 0) identity.appendChild(el("p", "contact", contactParts.join(SEPARATORS.contact[state.lang])));
   header.appendChild(identity);
   if (showPhoto) {
     const photo = el("img", "photo");
     photo.src = photoSrc;
-    photo.alt = "";
+    photo.alt = name;
     header.appendChild(photo);
   }
   cv.appendChild(header);
 
   if (isOn(CV.summary.id)) {
     const variant = CV.summary.variants.find((v) => v.id === state.summaryChoice);
-    cv.appendChild(editable("p", "summary", variant.key, t(variant.text)));
+    cv.appendChild(editable("p", "summary", variant.key, t(variant.text), "summary"));
   }
 }
 
@@ -1052,13 +1121,13 @@ function renderExperience(cv) {
   section.appendChild(el("h2", "", t(CV.labels.experience)));
   jobs.forEach((job) => {
     const block = el("div", "entry");
-    block.appendChild(row(editable("span", "", job.id + ":title", t(job.title)), datesNode(job.id + ":dates", job.dates ? t(job.dates) : ""), orgInline(job)));
+    block.appendChild(entryRow(job));
     const bullets = job.bullets.filter((b) => isOn(b.id));
     if (bullets.length > 0) {
       const ul = el("ul");
       bullets.forEach((b) => {
         const li = el("li");
-        li.appendChild(editable("span", "", b.id, t(b.text)));
+        li.appendChild(editable("span", "", b.id, t(b.text), "bullet"));
         ul.appendChild(li);
       });
       block.appendChild(ul);
@@ -1075,8 +1144,9 @@ function renderEducation(cv) {
   section.appendChild(el("h2", "", t(CV.labels.education)));
   items.forEach((e) => {
     const block = el("div", "entry");
-    block.appendChild(row(editable("span", "", e.id + ":title", t(e.title)), datesNode(e.id + ":dates", t(e.dates)), orgInline(e)));
-    if (t(e.detail)) block.appendChild(editable("p", "detail", e.id + ":detail", t(e.detail)));
+    block.appendChild(entryRow(e));
+    const detail = e.detail ? t(e.detail) : "";
+    if (detail) block.appendChild(editable("p", "detail", e.id + ":detail", detail, "detail"));
     section.appendChild(block);
   });
   cv.appendChild(section);
@@ -1091,8 +1161,8 @@ function renderLists(cv, onlyIds) {
     const ul = el("ul", "extra");
     items.forEach((item) => {
       const li = el("li");
-      const text = t(item.text);
-      const label = editable("strong", "", item.id + ":label", t(item.label));
+      const text = item.text ? t(item.text) : "";
+      const label = editable("strong", "", item.id + ":label", t(item.label), "label");
       // Avec des dates, la ligne suit le modèle des expériences : intitulé à gauche, dates à droite.
       if (item.dates) li.appendChild(row(label, datesNode(item.id + ":dates", t(item.dates))));
       else li.appendChild(label);
@@ -1100,13 +1170,13 @@ function renderLists(cv, onlyIds) {
         const sub = el("ul", "sub");
         text.split("\n").forEach((part, i) => {
           const subItem = el("li");
-          subItem.appendChild(editable("span", "", item.id + ":text" + i, part));
+          subItem.appendChild(editable("span", "", item.id + ":text" + i, part, "text"));
           sub.appendChild(subItem);
         });
         li.appendChild(sub);
       } else if (text) {
-        li.appendChild(document.createTextNode(" : "));
-        li.appendChild(editable("span", "", item.id + ":text", text));
+        li.appendChild(document.createTextNode(SEPARATORS.label[state.lang]));
+        li.appendChild(editable("span", "", item.id + ":text", text, "text"));
       }
       ul.appendChild(li);
     });
@@ -1122,18 +1192,15 @@ function renderExtra(cv) {
   const section = el("section", "cv-section");
   section.appendChild(el("h2", "", t(CV.labels.extra)));
   const ul = el("ul", "extra");
-  const addLine = (label, values) => {
-    const li = el("li");
-    li.appendChild(el("strong", "", t(label) + (state.lang === "fr" ? " : " : ": ")));
-    values.forEach((value, i) => {
-      if (i > 0) li.appendChild(document.createTextNode(", "));
-      li.appendChild(editable("span", "", value.id, t(value.text)));
-      // Le niveau (langues) se règle avec le curseur, pas au clavier.
-      if (value.level) li.appendChild(document.createTextNode(" (" + state.levels[value.id] + ")"));
-    });
-    ul.appendChild(li);
-  };
-  addLine(CV.labels.languages, langs);
+  const li = el("li");
+  li.appendChild(el("strong", "", t(CV.labels.languages) + SEPARATORS.label[state.lang]));
+  langs.forEach((value, i) => {
+    if (i > 0) li.appendChild(document.createTextNode(", "));
+    li.appendChild(editable("span", "", value.id, t(value.text), "language"));
+    // Le niveau (langues) se règle avec le curseur, pas au clavier.
+    if (value.level) li.appendChild(document.createTextNode(" (" + state.levels[value.id] + ")"));
+  });
+  ul.appendChild(li);
   section.appendChild(ul);
   cv.appendChild(section);
 }
@@ -1150,44 +1217,86 @@ function renderCV() {
   fitOnePage(cv);
 }
 
-// Réduit le CV (zoom) jusqu\'à ce qu\'il tienne sur un A4. La largeur est agrandie d\'autant
-// pour que la page garde 210 mm à l\'écran et à l\'impression.
+// Réduit le CV (zoom) jusqu'à ce qu'il tienne sur un A4. La largeur est agrandie d'autant
+// pour que la page garde 210 mm à l'écran et à l'impression.
+// Recherche dichotomique : environ 6 mesures au lieu d'une vingtaine de reflows.
 const FIT_MIN = 0.5;
-const FIT_STEP = 0.02;
+const FIT_PRECISION = 0.01;
+const FIT_MARGIN_PX = 2; // marge de sécurité : une page imprimée arrondit autrement qu'à l'écran
 function fitOnePage(cv) {
   cv.style.setProperty("--cv-title", state.titleColor);
   cv.classList.toggle("one-page", state.onePage);
   cv.style.setProperty("--fit", "1");
+  const warning = document.getElementById("fit-warning");
+  warning.textContent = "";
   if (!state.onePage) return;
-  const a4Height = document.getElementById("a4-probe").getBoundingClientRect().height;
-  let fit = 1;
-  cv.style.setProperty("--fit", String(fit));
-  while (fit > FIT_MIN && cv.scrollHeight * fit > a4Height) {
-    fit = Math.round((fit - FIT_STEP) * 100) / 100;
+  const limit = document.getElementById("a4-probe").getBoundingClientRect().height - FIT_MARGIN_PX;
+  // On mesure le contenu seul (comme à l'impression, où min-height est supprimée), pas la page A4 minimale.
+  cv.style.minHeight = "0";
+  const fits = (fit) => {
     cv.style.setProperty("--fit", String(fit));
+    return cv.scrollHeight * fit <= limit;
+  };
+  if (fits(1)) {
+    cv.style.removeProperty("min-height");
+    return;
   }
+  if (!fits(FIT_MIN)) {
+    warning.textContent = UI_TEXT.fitTooLong[state.lang];
+    cv.style.removeProperty("min-height");
+    return;
+  }
+  // Invariant : `low` tient sur une page, `high` non.
+  let low = FIT_MIN;
+  let high = 1;
+  while (high - low > FIT_PRECISION) {
+    const middle = (low + high) / 2;
+    if (fits(middle)) low = middle;
+    else high = middle;
+  }
+  cv.style.setProperty("--fit", String(Math.floor(low * 100) / 100));
+  cv.style.removeProperty("min-height");
 }
 
 // --- Démarrage ---
+// Message d'erreur lisible à la place d'une page blanche.
+function showFatal(message) {
+  if (typeof document === "undefined") return;
+  const box = document.createElement("div");
+  box.className = "fatal";
+  box.setAttribute("role", "alert");
+  box.textContent = message;
+  document.body.prepend(box);
+}
+
 function init() {
-  loadState();
-  document.querySelectorAll("[data-lang]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.lang = btn.dataset.lang;
-      saveState();
-      renderToolbar();
-      renderControls();
-      renderCV();
+  try {
+    loadState();
+    document.querySelectorAll("[data-lang]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.lang = btn.dataset.lang;
+        saveState();
+        renderToolbar();
+        renderControls();
+        renderCV();
+      });
     });
-  });
-  setupEditing();
-  setupConfigs();
-  // Demande au navigateur de ne pas effacer la progression quand il manque de place.
-  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  document.getElementById("export-btn").addEventListener("click", () => window.print());
-  renderToolbar();
-  renderControls();
-  renderCV();
+    setupEditing();
+    setupConfigs();
+    // Demande au navigateur de ne pas effacer la progression quand il manque de place.
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    document.getElementById("export-btn").addEventListener("click", () => window.print());
+    renderToolbar();
+    renderControls();
+    renderCV();
+    // Les polices web arrivent après le premier rendu et changent la hauteur du CV : on remesure.
+    const refit = () => fitOnePage(document.getElementById("cv"));
+    if (document.fonts) document.fonts.ready.then(refit);
+    window.addEventListener("beforeprint", refit);
+  } catch (err) {
+    console.error("Démarrage impossible :", err);
+    showFatal("Erreur : l'application n'a pas pu s'afficher (" + err.message + "). / The app could not be displayed.");
+  }
 }
 
 // Sans page (tests en ligne de commande ou tests.html), on ne démarre pas l'interface.
