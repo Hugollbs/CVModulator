@@ -440,13 +440,20 @@ function restoreCustom(data) {
   applyCustom();
 }
 
-function loadConfig(index) {
+// Partie « données » du chargement d'une configuration (sans toucher à l'écran) ; renvoie null si elle est invalide,
+// sinon le nombre d'éléments cochés qui n'existent plus.
+function applyConfig(index) {
   const config = state.configs[index];
-  if (!config) return;
+  if (!config) return null;
   restoreCustom(config.data);
   const known = new Set(collectIds(true));
   const unknown = config.data.checked.filter((id) => !known.has(id)).length;
-  if (!applySaved(config.data)) return;
+  return applySaved(config.data) ? unknown : null;
+}
+
+function loadConfig(index) {
+  const unknown = applyConfig(index);
+  if (unknown === null) return;
   saveState();
   refreshAll();
   if (unknown > 0) notify(UI_TEXT.configMissing[state.lang].replace("{n}", String(unknown)), true);

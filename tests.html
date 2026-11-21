@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Tests de CV modulaire</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; }
+    li { margin: 4px 0; }
+    .ok::before { content: "✔ "; color: #2e7d32; }
+    .fail::before { content: "✘ "; color: #c62828; }
+    pre { margin: 2px 0 0 20px; color: #c62828; }
+  </style>
+</head>
+<body>
+  <h1>Tests de CV modulaire</h1>
+  <p id="summary">Exécution…</p>
+  <ul id="results"></ul>
+  <!-- Mêmes scripts que index.html (sans le DOM de l'application : app.js ne démarre pas l'interface). -->
+  <script src="data.js"></script>
+  <script src="i18n.js"></script>
+  <script src="validate.js"></script>
+  <script src="app.js"></script>
+  <script src="tests/cases.js"></script>
+  <script src="tests/page.js"></script>
+</body>
+</html>
