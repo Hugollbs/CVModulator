@@ -610,14 +610,47 @@ function deleteConfig(index) {
   renderConfigs();
 }
 
+function buildBackup() {
+  return { app: "cv-modulaire", version: 1, state: fullState(), configs: state.configs };
+}
+
 function exportBackup() {
-  const backup = { app: "cv-modulaire", version: 1, state: fullState(), configs: state.configs };
-  const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: "application/json" }));
+  const url = URL.createObjectURL(new Blob([JSON.stringify(buildBackup())], { type: "application/json" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = "cv-modulaire-sauvegarde.json";
   link.click();
   URL.revokeObjectURL(url);
+}
+
+// Un import remplace TOUT (comme le dit la confirmation) : les clés absentes du fichier reviennent à leur valeur d'origine.
+function emptyProgress() {
+  return {
+    custom: [],
+    identity: {},
+    edits: {},
+    github: "",
+    showPhoto: true,
+    onePage: false,
+    showSubtitle: true,
+    titleColor: DEFAULT_TITLE_COLOR,
+    contact: { address: true, phone: true, email: true, github: true },
+    photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "",
+    summaryChoice: CV.summary.variants[0].id,
+  };
+}
+
+function applyBackup(backup) {
+  if (!backup || backup.app !== "cv-modulaire") return false;
+  // La photo importée n'est remplacée que si la sauvegarde est valide (elle peut ne pas en contenir).
+  const previousPhoto = state.photo;
+  state.photo = null;
+  if (!applySaved({ ...emptyProgress(), ...backup.state })) {
+    state.photo = previousPhoto;
+    return false;
+  }
+  state.configs = validConfigs(backup.configs);
+  return true;
 }
 
 async function importBackup(file) {
@@ -626,20 +659,13 @@ async function importBackup(file) {
     const backup = JSON.parse(await file.text());
     if (!backup || backup.app !== "cv-modulaire") throw new Error("format inconnu");
     if (!window.confirm(UI_TEXT.importConfirm[state.lang])) return;
-    // La photo importée n'est remplacée que si la sauvegarde est valide (elle peut ne pas en contenir).
-    const previousPhoto = state.photo;
-    state.photo = null;
-    if (!applySaved(backup.state)) {
-      state.photo = previousPhoto;
-      throw new Error("progression invalide");
-    }
-    state.configs = validConfigs(backup.configs);
+    if (!applyBackup(backup)) throw new Error("progression invalide");
     saveState();
     saveConfigs();
     refreshAll();
   } catch (err) {
     console.warn("Import de sauvegarde impossible :", err);
-    window.alert(UI_TEXT.importError[state.lang]);
+    notify(UI_TEXT.importError[state.lang], true);
   }
 }
 
