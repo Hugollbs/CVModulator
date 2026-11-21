@@ -196,3 +196,4 @@ body {
 .add form { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--ivory-dark); border-radius: 8px; }
 .add .field { display: block; margin-bottom: 4px; font-size: 12px; color: var(--cloud); }
 .add textarea.text-input { resize: vertical; }
+#notice:empty { display: none; }

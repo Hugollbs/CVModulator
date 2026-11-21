@@ -32,6 +32,7 @@ const UI_TEXT = {
   configDelete: { fr: "Supprimer", en: "Delete" },
   configOverwrite: { fr: "Une configuration porte déjà ce nom. La remplacer ?", en: "A configuration with this name already exists. Replace it?" },
   configDeleteConfirm: { fr: "Supprimer cette configuration ?", en: "Delete this configuration?" },
+  configMissing: { fr: "{n} élément(s) de cette configuration n'existent plus et ont été ignorés.", en: "{n} item(s) of this configuration no longer exist and were ignored." },
   configFull: { fr: "Nombre maximum de configurations atteint.", en: "Maximum number of configurations reached." },
   backupExport: { fr: "Exporter une sauvegarde", en: "Export a backup" },
   backupImport: { fr: "Importer une sauvegarde", en: "Import a backup" },
@@ -136,10 +137,11 @@ function fullState() {
   return { lang: state.lang, checked: [...state.checked], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity };
 }
 
-// Ce que garde une configuration : la sélection seulement (textes et photo importée restent globaux).
+// Ce que garde une configuration : la sélection, plus le contenu des éléments ajoutés cochés
+// (pour pouvoir les retrouver s'ils ont été supprimés depuis). Textes modifiés, identité et photo restent globaux.
 function snapshot() {
-  const { lang, checked, levels, showPhoto, onePage, showSubtitle, titleColor, photoChoice, summaryChoice } = fullState();
-  return { lang, checked, levels: { ...levels }, showPhoto, onePage, showSubtitle, titleColor, photoChoice, summaryChoice, contact: { ...state.contact }, github: state.github, customPhoto: Boolean(state.photo) };
+  const { photo, edits, custom, identity, ...selection } = fullState();
+  return { ...selection, levels: { ...selection.levels }, contact: { ...selection.contact }, customItems: custom.map((c) => ({ ...c })), customPhoto: Boolean(photo) };
 }
 
 function setSaveStatus(ok) {
@@ -158,6 +160,14 @@ let saveTimer = null;
 function saveStateSoon() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveState, SAVE_DELAY_MS);
+}
+
+// Message à l'utilisateur dans une zone annoncée par les lecteurs d'écran (à la place de window.alert).
+function notify(text, isError) {
+  const zone = document.getElementById("notice");
+  if (!zone) return;
+  zone.textContent = text;
+  zone.classList.toggle("error", Boolean(isError));
 }
 
 function saveState() {
@@ -356,11 +366,12 @@ function applySaved(saved) {
   if (!saved || typeof saved !== "object") return false;
   if ((saved.lang !== "fr" && saved.lang !== "en") || !Array.isArray(saved.checked)) return false;
   state.lang = saved.lang;
-  state.checked = new Set(saved.checked.filter((id) => typeof id === "string"));
   if (saved.custom !== undefined) {
     state.custom = validCustom(saved.custom);
     applyCustom();
   }
+  const known = new Set(collectIds(true));
+  state.checked = new Set(saved.checked.filter((id) => typeof id === "string" && known.has(id)));
   if (saved.identity !== undefined) state.identity = validIdentity(saved.identity);
   state.levels = { ...defaultLevels(), ...validLevels(saved.levels) };
   if (saved.edits !== undefined) state.edits = validEdits(saved.edits);
@@ -395,6 +406,7 @@ function validConfigs(raw) {
       summaryChoice: c.data.summaryChoice,
       contact: validContact(c.data.contact),
       github: c.data.github === undefined ? undefined : validGithub(c.data.github),
+      customItems: validCustom(c.data.customItems),
       customPhoto: c.data.customPhoto === true,
     } }));
 }
@@ -412,14 +424,16 @@ function loadState() {
 
 // --- Liste de tous les ids, pour le profil « Tout » ---
 // Les éléments avec `flag` (à confirmer / profil particulier) ne sont jamais cochés d'office.
-function allIds() {
+function collectIds(withFlagged) {
+  const keep = (item) => withFlagged || !item.flag;
   const ids = [CV.summary.id, CV.languages.id];
-  CV.experience.filter((e) => !e.flag).forEach((e) => ids.push(e.id, ...e.bullets.map((b) => b.id)));
+  CV.experience.filter(keep).forEach((e) => ids.push(e.id, ...e.bullets.map((b) => b.id)));
   CV.education.forEach((e) => ids.push(e.id));
   CV.languages.items.forEach((l) => ids.push(l.id));
-  CV.lists.forEach((list) => list.items.filter((i) => !i.flag).forEach((i) => ids.push(i.id)));
+  CV.lists.forEach((list) => list.items.filter(keep).forEach((i) => ids.push(i.id)));
   return ids;
 }
+const allIds = () => collectIds(false);
 
 function applyProfile(key) {
   const profile = PROFILES[key];
@@ -564,11 +578,29 @@ function saveConfig() {
   renderConfigs();
 }
 
+// Remet les éléments ajoutés cochés dans la configuration (et les expériences parentes de leurs puces)
+// qui ont été supprimés depuis son enregistrement.
+function restoreCustom(data) {
+  const items = data.customItems || [];
+  const wanted = new Set(data.checked);
+  items.forEach((c) => { if (c.kind === "bullet" && wanted.has(c.id)) wanted.add(c.parent); });
+  const have = new Set(state.custom.map((c) => c.id));
+  const missing = items.filter((c) => wanted.has(c.id) && !have.has(c.id));
+  if (missing.length === 0) return;
+  state.custom = validCustom([...state.custom, ...missing]);
+  applyCustom();
+}
+
 function loadConfig(index) {
   const config = state.configs[index];
-  if (!config || !applySaved(config.data)) return;
+  if (!config) return;
+  restoreCustom(config.data);
+  const known = new Set(collectIds(true));
+  const unknown = config.data.checked.filter((id) => !known.has(id)).length;
+  if (!applySaved(config.data)) return;
   saveState();
   refreshAll();
+  if (unknown > 0) notify(UI_TEXT.configMissing[state.lang].replace("{n}", String(unknown)), true);
 }
 
 function deleteConfig(index) {
