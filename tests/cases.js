@@ -247,6 +247,76 @@ test("le profil « Vide » n'est pas ajouté à l'objet PROFILES des données", 
   assert(Object.hasOwn(ALL_PROFILES, "empty"));
 });
 
+// --- Affichage des listes (projets, etc.) ---
+// Sous Node il n'y a pas de document : on en fournit un minimal (juste ce que el(), editable() et row() utilisent).
+// Dans tests.html, c'est le vrai document du navigateur qui sert.
+function fakeDocument() {
+  const makeText = (text) => ({ textContent: text, childNodes: [] });
+  const makeElement = () => {
+    const node = { className: "", dataset: {}, childNodes: [] };
+    node.appendChild = (child) => { node.childNodes.push(child); return child; };
+    node.append = (...children) => children.forEach((child) => node.appendChild(child));
+    node.setAttribute = () => {};
+    Object.defineProperty(node, "textContent", {
+      get: () => node.childNodes.map((child) => child.textContent).join(""),
+      set: (text) => { node.childNodes = [makeText(String(text))]; },
+    });
+    return node;
+  };
+  return { createElement: makeElement, createTextNode: makeText };
+}
+
+// Rend une liste contenant `item`, puis remet CV et state dans leur état d'origine.
+function renderOneListItem(item) {
+  const fake = typeof document === "undefined";
+  if (fake) globalThis.document = fakeDocument();
+  const list = CV.lists[0];
+  const oldLang = state.lang;
+  state.lang = "fr";
+  list.items.push(item);
+  state.checked.add(item.id);
+  try {
+    const container = document.createElement("div");
+    renderLists(container, [list.id]);
+    return container;
+  } finally {
+    list.items.pop();
+    state.checked.delete(item.id);
+    state.lang = oldLang;
+    if (fake) delete globalThis.document;
+  }
+}
+
+// Premier nœud (en profondeur) dont la classe CSS contient `name`.
+function findByClass(node, name) {
+  if (String(node.className || "").split(" ").includes(name)) return node;
+  for (const child of Array.from(node.childNodes)) {
+    const found = findByClass(child, name);
+    if (found) return found;
+  }
+  return null;
+}
+
+test("renderLists : l'environnement d'un projet (org) s'affiche sur la ligne de son nom", () => {
+  const container = renderOneListItem({ id: "zz-proj", label: { fr: "Nom" }, org: { fr: "Env" }, text: { fr: "Phrase" }, bullets: true });
+  const row = findByClass(container, "row");
+  assert(row, "la ligne de titre (row) est absente");
+  same(row.textContent, "Nom - Env");
+  same(findByClass(container, "sub").textContent, "Phrase");
+});
+
+test("renderLists : sans org ni dates, le format « nom : texte » reste inchangé", () => {
+  const container = renderOneListItem({ id: "zz-simple", label: { fr: "Nom" }, text: { fr: "Texte" } });
+  assert(!findByClass(container, "row"), "pas de ligne de titre attendue");
+  assert(container.textContent.includes("Nom" + SEPARATORS.label.fr + "Texte"), "format nom : texte attendu");
+});
+
+test("un texte modifié sur l'org d'un élément de liste (id:org) est conservé au chargement", () => {
+  const id = CV.lists[0].items[0].id;
+  const edits = validEdits({ fr: { [id + ":org"]: "Env modifié" }, en: {} }, dataContext());
+  same(edits.fr[id + ":org"], "Env modifié");
+});
+
 // --- Exécution ---
 function runTests() {
   return tests.map(({ name, fn }) => {

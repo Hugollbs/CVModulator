@@ -1170,8 +1170,9 @@ function renderLists(cv, onlyIds) {
       const li = el("li");
       const text = item.text ? t(item.text) : "";
       const label = editable("strong", "", item.id + ":label", t(item.label), "label");
-      // Avec des dates, la ligne suit le modèle des expériences : intitulé à gauche, dates à droite.
-      if (item.dates) li.appendChild(row(label, datesNode(item.id + ":dates", t(item.dates))));
+      // Avec des dates ou une structure (org, ex. l'environnement technique d'un projet), la ligne suit le modèle
+      // des expériences : intitulé et structure à gauche, dates à droite.
+      if (item.dates || item.org) li.appendChild(row(label, datesNode(item.id + ":dates", item.dates ? t(item.dates) : ""), orgInline(item)));
       else li.appendChild(label);
       if (text.includes("\n") || item.bullets) {
         const sub = el("ul", "sub");
