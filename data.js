@@ -37,7 +37,7 @@ const CV = {
       id: "exp-dev",
       title: { fr: "Stagiaire développeuse web", en: "Web developer intern" },
       org: { fr: "Atelier Pixel, Lyon", en: "Atelier Pixel, Lyon" },
-      dates: { fr: "Juil. - août 2025", en: "Jul. - Aug. 2025" },
+      dates: { fr: "Juil. – août 2025", en: "Jul. – Aug. 2025" },
       bullets: [
         { id: "exp-dev-1", text: { fr: "Refonte du site vitrine d'un client (HTML, CSS, JavaScript).", en: "Redesigned a client's showcase website (HTML, CSS, JavaScript)." } },
         { id: "exp-dev-2", text: { fr: "Correction de 25 anomalies d'affichage sur mobile.", en: "Fixed 25 mobile display issues." } },
@@ -47,7 +47,7 @@ const CV = {
       id: "exp-soutien",
       title: { fr: "Tutrice en mathématiques", en: "Maths tutor" },
       org: { fr: "Association Réussir ensemble, Lyon", en: "Réussir ensemble association, Lyon" },
-      dates: { fr: "2024 - 2025", en: "2024 - 2025" },
+      dates: { fr: "2024 – 2025", en: "2024 – 2025" },
       bullets: [
         { id: "exp-soutien-1", text: { fr: "Accompagnement hebdomadaire de 4 lycéens en difficulté.", en: "Weekly support for 4 struggling high-school students." } },
       ],
@@ -58,7 +58,7 @@ const CV = {
       id: "edu-licence",
       title: { fr: "Licence Informatique", en: "BSc in Computer Science" },
       org: { fr: "Université de Lyon", en: "University of Lyon" },
-      dates: { fr: "2023 - 2026", en: "2023 - 2026" },
+      dates: { fr: "2023 – 2026", en: "2023 – 2026" },
       detail: { fr: "Algorithmique, bases de données, programmation web, réseaux.", en: "Algorithms, databases, web programming, networks." },
     },
     {

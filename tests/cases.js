@@ -308,7 +308,7 @@ test("renderLists : l'environnement d'un projet (org) s'affiche sur la ligne de 
   const container = renderOneListItem({ id: "zz-proj", label: { fr: "Nom" }, org: { fr: "Env" }, text: { fr: "Phrase" }, bullets: true });
   const row = findByClass(container, "row");
   assert(row, "la ligne de titre (row) est absente");
-  same(row.textContent, "Nom - Env");
+  same(row.textContent, "Nom – Env");
   same(findByClass(container, "sub").textContent, "Phrase");
 });
 

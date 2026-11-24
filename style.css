@@ -74,44 +74,56 @@ body {
 .page {
   width: 210mm;
   min-height: 297mm;
-  padding: 10mm 14mm;
+  padding: 13mm 15mm;
   background: #fff;
   box-shadow: 0 1px 3px rgba(20, 20, 19, 0.12), 0 12px 32px rgba(20, 20, 19, 0.08);
   font-family: var(--sans);
-  font-size: 10.5pt;
-  line-height: 1.45;
+  font-size: 10pt;
+  line-height: 1.35;
   color: #000;
 }
 
 /* Mise en page du CV d'origine : photo à droite, filets violets entre les sections.
    La photo flotte : l'identité puis la présentation s'écoulent à sa gauche, et le texte reprend toute la largeur
    sous elle. flow-root fait englober la photo par l'en-tête, pour que le filet de la section suivante passe dessous. */
-.cv-header { display: flow-root; padding-bottom: 5mm; }
+.cv-header { display: flow-root; padding-bottom: 4mm; }
 .identity { text-align: left; }
-.identity h1 { margin: 2mm 0 2mm; font-size: 30pt; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-.contact { margin: 0; font-size: 10.5pt; }
+.identity h1 { margin: 0 0 1.5mm; font-size: 24pt; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
+.contact { margin: 0; font-size: 9.5pt; color: var(--cv-muted); }
 .photo { float: right; width: 56mm; height: 49mm; object-fit: cover; margin: 0 0 3mm 6mm; }
 
-.summary { margin: 4mm 0 0; text-align: left; }
+/* text-wrap: pretty évite un mot seul sur la dernière ligne (ignoré sans risque par les navigateurs qui ne le gèrent pas) */
+.summary { margin: 3mm 0 0; text-align: left; text-wrap: pretty; }
 
-/* Un seul filet, violet, au-dessus de chaque section ; mêmes marges partout */
-.cv-section { padding: 5mm 0 0; margin-top: 5mm; border-top: 0.35mm solid var(--cv-title); }
+/* Titre de section en petites capitales espacées, filet fin juste dessous (convention des CV) */
+.cv-section { margin-top: 5mm; }
 .cv-header + .cv-section { margin-top: 0; }
-.cv-section h2 { margin: 0 0 3.5mm; font-size: 13pt; font-weight: 700; letter-spacing: 0.04em; color: var(--cv-title); }
+.cv-section h2 {
+  margin: 0 0 2.5mm;
+  padding-bottom: 1mm;
+  border-bottom: 0.3mm solid var(--cv-title);
+  font-size: 11pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cv-title);
+}
 
-.entry { margin-bottom: 4mm; break-inside: avoid; }
+.entry { margin-bottom: 3mm; break-inside: avoid; }
 .entry:last-child { margin-bottom: 0; }
 .row { display: flex; justify-content: space-between; gap: 8mm; align-items: baseline; }
-.row h4 { margin: 0; font-size: 10.5pt; font-weight: 600; }
-.dates { font-weight: 400; color: var(--cv-muted); white-space: nowrap; }
+.row h4 { margin: 0; font-size: 1em; font-weight: 600; }
+/* Chiffres de même largeur : les années s'alignent sur le bord droit d'une ligne à l'autre */
+.dates { font-weight: 400; color: var(--cv-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .org { font-weight: 400; color: var(--cv-muted); }
-.subtitle { margin: 0 0 2mm; font-size: 12pt; font-weight: 500; color: var(--cv-title); }
-.sub { margin: 1mm 0 0; padding-left: 5mm; list-style: circle; }
-.entry ul { margin: 1mm 0 0; padding-left: 5mm; }
-.entry li { margin: 0.5mm 0; }
+.subtitle { margin: 0 0 1.5mm; font-size: 11pt; font-weight: 500; color: var(--cv-title); }
+.sub { margin: 0.5mm 0 0; padding-left: 5mm; list-style: circle; }
+.entry ul { margin: 0.5mm 0 0; padding-left: 5mm; }
+.entry li { margin: 0.3mm 0; }
 .detail { margin: 0; }
 .extra { margin: 0; padding-left: 5mm; }
-.extra li { margin-bottom: 2.5mm; }
+.extra li { margin-bottom: 1.2mm; }
+.extra li:last-child { margin-bottom: 0; }
 
 /* ---------- Petits écrans ---------- */
 @media (max-width: 1100px) {

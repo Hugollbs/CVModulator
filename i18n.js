@@ -115,7 +115,7 @@ const UI_TEXT = {
 
 // Séparateurs et morceaux de texte qui dépendent de la langue (typographie française : espace avant « : »).
 const SEPARATORS = {
-  org: { fr: " - ", en: " - " }, // intitulé - structure
+  org: { fr: " – ", en: " – " }, // intitulé – structure (tiret demi-cadratin, usage typographique)
   contact: { fr: " • ", en: " • " }, // entre les coordonnées
   label: { fr: " : ", en: ": " }, // libellé : valeur
   pageTitle: { fr: "CV - ", en: "CV - " },
