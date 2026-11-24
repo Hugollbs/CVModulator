@@ -40,7 +40,7 @@ L'option « Tenir sur une page » réduit la taille du texte jusqu'à 50 % ; si 
 
 ## Confidentialité
 
-Tes données restent dans ton navigateur (`localStorage`). Elles ne sont envoyées nulle part : la page interdit toute requête réseau (Content-Security-Policy) ; seules les polices Google Fonts sont chargées depuis Internet.
+Tes données restent dans ton navigateur (`localStorage`). Elles ne sont envoyées nulle part : la page interdit toute requête réseau (Content-Security-Policy) ; même les polices (Inter, Newsreader, licence OFL) sont hébergées avec le site, dans `fonts/`.
 
 **Attention : ton adresse, ton numéro de téléphone et ta photo sont stockés en clair** dans `localStorage` (donc lisibles par toute personne qui utilise ce navigateur avec ta session) et dans le fichier JSON de sauvegarde. Ne partage pas ce fichier, et n'utilise pas l'application avec des données personnelles sur un ordinateur partagé.
 
@@ -87,7 +87,7 @@ A dependency-free web app to build a tailored CV: tick the items you want, pick 
 
 ## Privacy
 
-Everything stays in your browser (`localStorage`); the page forbids network requests (Content-Security-Policy) except Google Fonts. **Your address, phone number and photo are stored in plain text** in `localStorage` and in the exported JSON backup: do not share that file and avoid using the app with personal data on a shared computer.
+Everything stays in your browser (`localStorage`); the page forbids network requests (Content-Security-Policy); even the fonts (Inter, Newsreader, OFL licence) are served with the site, from `fonts/`. **Your address, phone number and photo are stored in plain text** in `localStorage` and in the exported JSON backup: do not share that file and avoid using the app with personal data on a shared computer.
 
 ## Tests
 

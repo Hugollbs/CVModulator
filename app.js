@@ -887,18 +887,18 @@ function loadImage(file) {
     // Contrôles avant tout décodage : on ne charge pas un fichier inutilement lourd ou d'un type non prévu.
     if (!PHOTO_TYPES.includes(file.type)) return reject(photoError("type"));
     if (file.size > MAX_PHOTO_FILE_BYTES) return reject(photoError("size"));
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    // Une fois l'image décodée, elle reste utilisable même après la libération de l'URL temporaire.
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
+    // URL data: plutôt que blob: (URL.createObjectURL) : un serveur peut interdire les images blob: dans sa propre
+    // CSP (c'est le cas de nginx sur « plante » : img-src 'self' data:), alors que data: y est toujours permis,
+    // puisque c'est déjà la forme de la photo enregistrée.
+    const reader = new FileReader();
+    reader.onerror = () => reject(photoError("unreadable"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(photoError("unreadable"));
+      img.src = reader.result;
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(photoError("unreadable"));
-    };
-    img.src = url;
+    reader.readAsDataURL(file);
   });
 }
 
