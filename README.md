@@ -16,7 +16,7 @@ Version anglaise : [aperçu](docs/apercu-en.png).
 
 1. Ouvrir `index.html` dans un navigateur (double-clic, ou `python3 -m http.server` puis http://localhost:8000).
 2. Ajouter son contenu avec les boutons « + Ajouter » (expériences, études, compétences, langues…). Les textes se modifient en cliquant dessus (ou avec Tab, puis en tapant ; Entrée valide).
-3. Cocher / décocher les éléments, choisir la langue, importer une photo (JPEG, PNG ou WebP, 8 Mo maximum).
+3. Cocher / décocher les éléments, choisir la langue, importer une photo (JPEG, PNG ou WebP, 8 Mo maximum) : une fenêtre permet de la recadrer (paysage, carré ou portrait 3:4, zoom, déplacement à la souris, au doigt ou aux flèches du clavier).
 4. Cliquer sur « Exporter en PDF » (voir ci-dessous).
 
 ## Export PDF
@@ -34,8 +34,10 @@ L'option « Tenir sur une page » réduit la taille du texte jusqu'à 50 % ; si 
 ## Fonctionnalités
 
 - Contenu bilingue (chaque texte existe en français et en anglais).
-- Profils et configurations nommées : une configuration mémorise la sélection actuelle (cases cochées, langue, niveaux de langue, présentation, ainsi que le contenu des éléments ajoutés qu'elle utilise).
-- Sauvegarde automatique dans le navigateur, export / import en JSON.
+- Profils : des préréglages, plus les tiens. « Créer » enregistre la sélection actuelle (cases cochées, langue, niveaux de langue, photo, présentation, ainsi que le contenu des éléments ajoutés qu'elle utilise). Le × supprime un profil créé ; sur un préréglage, il le masque seulement (« Rétablir les profils masqués » le fait revenir).
+- Photo : import avec recadrage, cadre à hauteur fixe dont la largeur suit le format (une photo verticale laisse plus de place au texte). Le × efface la photo importée du navigateur, ou masque une photo proposée.
+- Mise en page aux conventions d'un CV : une colonne (lisible par les logiciels de tri de candidatures), titres de section en capitales espacées, dates alignées, tiret demi-cadratin.
+- Sauvegarde automatique dans le navigateur, export / import en JSON (section repliable « Sauvegarde »).
 - Aperçu A4 en direct.
 
 ## Confidentialité
@@ -48,7 +50,7 @@ Le dépôt ne contient aucune donnée personnelle : `data.js` contient un CV d'e
 
 ## Tests
 
-Sans dépendance : `node tests/run.mjs` (Node 20 ou plus), ou ouvrir `tests.html` dans le navigateur (via `python3 -m http.server`). Les tests vérifient la validation, le nettoyage des chaînes, le chargement d'un état corrompu et l'aller-retour export / import. Ils sont lancés automatiquement par GitHub Actions.
+Sans dépendance : `node tests/run.mjs` (Node 20 ou plus), ou ouvrir `tests.html` dans le navigateur (via `python3 -m http.server`). Les tests vérifient la validation, le nettoyage des chaînes, le chargement d'un état corrompu, l'aller-retour export / import, le calcul du recadrage et la gestion des profils et des photos masqués. Ils sont lancés automatiquement par GitHub Actions.
 
 ## Licence
 
@@ -59,11 +61,12 @@ Sans dépendance : `node tests/run.mjs` (Node 20 ou plus), ou ouvrir `tests.html
 | Fichier | Rôle |
 |---|---|
 | `index.html` | Structure de la page (panneau de contrôle + aperçu) et Content-Security-Policy |
-| `style.css` | Mise en forme de l'interface et du CV imprimé |
+| `style.css` | Mise en forme de l'interface et du CV imprimé, déclaration des polices |
 | `data.js` | CV d'exemple fictif, libellés, profils prédéfinis |
 | `i18n.js` | Textes de l'interface (français / anglais) et séparateurs |
 | `validate.js` | Validation et nettoyage des données (fonctions pures) |
-| `app.js` | Logique : état, stockage, rendu, édition, configurations, export |
+| `app.js` | Logique : état, stockage, rendu, édition, profils, recadrage de la photo, export |
+| `fonts/` | Polices Inter et Newsreader (licence OFL) hébergées avec le site |
 | `tests/`, `tests.html` | Tests sans dépendance |
 
 Règle de sécurité : le code n'utilise jamais `innerHTML` (ni équivalent) avec des données de l'utilisateur ; tout passe par `textContent` / `createTextNode`.
@@ -82,8 +85,9 @@ A dependency-free web app to build a tailored CV: tick the items you want, pick 
 
 1. Open `index.html` in a browser (double-click, or `python3 -m http.server` then http://localhost:8000).
 2. Add your content with the "+ Add" buttons; click any text in the CV to edit it (or Tab to it and type; Enter confirms).
-3. Tick / untick items, choose the language, import a photo (JPEG, PNG or WebP, 8 MB max).
-4. Click "Export as PDF" and, in the print dialog, choose "Save as PDF", paper size A4, no margins, scale 100%, **headers and footers off**.
+3. Tick / untick items, choose the language, import a photo (JPEG, PNG or WebP, 8 MB max) and crop it (landscape, square or 3:4 portrait, zoom, drag or arrow keys).
+4. Save the current selection as a named profile ("Create"); × deletes a profile you created, and only hides a built-in one. Export / import a JSON backup from the "Backup" section.
+5. Click "Export as PDF" and, in the print dialog, choose "Save as PDF", paper size A4, no margins, scale 100%, **headers and footers off**.
 
 ## Privacy
 
