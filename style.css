@@ -83,19 +83,20 @@ body {
   color: #000;
 }
 
-/* Mise en page du CV d'origine : nom centré, photo à droite, filets violets entre les sections */
-.cv-header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 6mm; }
-.identity { flex: 1; text-align: left; padding-right: 6mm; }
+/* Mise en page du CV d'origine : photo à droite, filets violets entre les sections.
+   La photo flotte : l'identité puis la présentation s'écoulent à sa gauche, et le texte reprend toute la largeur
+   sous elle. flow-root fait englober la photo par l'en-tête, pour que le filet de la section suivante passe dessous. */
+.cv-header { display: flow-root; padding-bottom: 5mm; }
+.identity { text-align: left; }
 .identity h1 { margin: 2mm 0 2mm; font-size: 30pt; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
 .contact { margin: 0; font-size: 10.5pt; }
-.photo { width: 56mm; height: 49mm; object-fit: cover; flex-shrink: 0; }
+.photo { float: right; width: 56mm; height: 49mm; object-fit: cover; margin: 0 0 3mm 6mm; }
 
-.summary { margin: 0 0 5mm; text-align: left; }
+.summary { margin: 4mm 0 0; text-align: left; }
 
 /* Un seul filet, violet, au-dessus de chaque section ; mêmes marges partout */
 .cv-section { padding: 5mm 0 0; margin-top: 5mm; border-top: 0.35mm solid var(--cv-title); }
-.cv-header + .cv-section, .summary + .cv-section { margin-top: 0; }
-.cv-header:not(:has(+ .summary)) { padding-bottom: 5mm; }
+.cv-header + .cv-section { margin-top: 0; }
 .cv-section h2 { margin: 0 0 3.5mm; font-size: 13pt; font-weight: 700; letter-spacing: 0.04em; color: var(--cv-title); }
 
 .entry { margin-bottom: 4mm; break-inside: avoid; }
@@ -154,10 +155,6 @@ body {
 .edit:focus { outline: 2px solid var(--clay); outline-offset: 2px; background: #fff7f2; }
 .dates.edit { white-space: nowrap; }
 @media print { .edit:hover, .edit:focus { outline: none; background: none; } }
-
-/* Sans photo : le titre est centré sur toute la largeur de la page */
-.cv-header.no-photo { padding-bottom: 4mm; }
-.cv-header.no-photo .identity { padding-right: 0; }
 
 /* Choix actif parmi les photos proposées */
 .chip[aria-pressed="true"] { background: var(--slate); color: var(--ivory); border-color: var(--slate); }

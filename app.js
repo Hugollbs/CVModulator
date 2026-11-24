@@ -39,12 +39,12 @@ function dataContext() {
 
 const BASE = { summary: CV.summary, experience: CV.experience, education: CV.education, lists: CV.lists, languages: CV.languages };
 
-const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
+const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), hidden: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
 
 // --- Sauvegarde locale (facultative : le CV marche sans) ---
 // Tout ce qui constitue la progression (sélection + textes + photo importée).
 function fullState() {
-  return { lang: state.lang, checked: [...state.checked], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity };
+  return { lang: state.lang, checked: [...state.checked], hidden: [...state.hidden], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity };
 }
 
 // Ce que garde une configuration : la sélection, plus le contenu des éléments ajoutés cochés
@@ -216,6 +216,9 @@ function applySaved(saved) {
   }
   const known = new Set(collectIds(true));
   state.checked = new Set(validIds(saved.checked).filter((id) => known.has(id)));
+  // Comme `checked`, remplacé à chaque chargement : une sauvegarde sans `hidden` (ancienne) laisse tout visible.
+  const knownLines = new Set(collectLineIds());
+  state.hidden = new Set(validIds(saved.hidden).filter((id) => knownLines.has(id)));
   if (saved.identity !== undefined) state.identity = validIdentity(saved.identity);
   state.levels = { ...defaultLevels(), ...validLevels(saved.levels, dataContext()) };
   if (saved.edits !== undefined) state.edits = validEdits(saved.edits, dataContext());
@@ -269,9 +272,20 @@ function collectIds(withFlagged) {
 }
 const allIds = () => collectIds(false);
 
+// Lignes d'un élément de liste (séparées par « \n » dans `text`). Quand il y en a plusieurs, chacune a un id dérivé
+// (« assoc-ae-2 ») et peut être masquée à part, comme une puce d'expérience. Le nombre est celui de la langue la plus
+// longue, pour que les ids ne dépendent pas de la langue affichée.
+function itemLineIds(item) {
+  if (!item.text) return [];
+  const count = Math.max(...["fr", "en"].map((lang) => (item.text[lang] || "").split("\n").length));
+  return count > 1 ? Array.from({ length: count }, (_, i) => item.id + "-" + (i + 1)) : [];
+}
+const collectLineIds = () => CV.lists.flatMap((list) => list.items.flatMap(itemLineIds));
+
 function applyProfile(key) {
   const profile = ALL_PROFILES[key];
   state.checked = new Set(profile.ids === "all" ? allIds() : profile.ids);
+  state.hidden = new Set();
 }
 
 const isOn = (id) => state.checked.has(id);
@@ -655,6 +669,7 @@ function removeCustom(id) {
   applyCustom();
   removed.forEach((gone) => {
     state.checked.delete(gone);
+    state.hidden.forEach((lineId) => { if (lineId.startsWith(gone + "-")) state.hidden.delete(lineId); });
     delete state.levels[gone];
     ["fr", "en"].forEach((lang) => {
       Object.keys(state.edits[lang]).filter((key) => key === gone || key.startsWith(gone + ":")).forEach((key) => delete state.edits[lang][key]);
@@ -982,6 +997,18 @@ function listControls(list) {
     const itemBox = itemCheckbox(item.id, t(item.label), { flag: item.flag });
     if (item.custom) itemBox.appendChild(removeButton(item.id, t(item.label)));
     box.appendChild(itemBox);
+    // Une case par ligne (cochée = visible) : on masque une ligne sans toucher aux autres.
+    const lines = t(item.text).split("\n");
+    itemLineIds(item).forEach((lineId, i) => {
+      if (!lines[i]) return;
+      box.appendChild(checkbox(lines[i], () => !state.hidden.has(lineId), (on) => {
+        if (on) state.hidden.delete(lineId);
+        else state.hidden.add(lineId);
+        saveState();
+        renderCV();
+        syncControls();
+      }, { className: "child", enabled: () => isOn(item.id) }));
+    });
   });
   const hint = UI_TEXT.addHint[state.lang] + " " + UI_TEXT.multilineHint[state.lang];
   box.appendChild(addForm("list-" + list.id, UI_TEXT.add[state.lang], [FIELD("label", true), FIELD("dates"), FIELD("text", false, "multiline", true)], (v) => addCustom({ kind: "item", list: list.id, ...v }), hint));
@@ -1094,7 +1121,7 @@ function renderHeader(cv) {
   const providedPhoto = CV.photos.find((p) => p.id === state.photoChoice);
   const photoSrc = state.photo || (providedPhoto && providedPhoto.src);
   const showPhoto = state.showPhoto && Boolean(photoSrc);
-  const header = el("header", showPhoto ? "cv-header" : "cv-header no-photo");
+  const header = el("header", "cv-header");
   const identity = el("div", "identity");
   const name = state.identity.name || CV.name;
   identity.appendChild(el("h1", "", name));
@@ -1106,19 +1133,20 @@ function renderHeader(cv) {
     state.contact.github && state.github && state.github.replace(/^https?:\/\//, ""),
   ].filter(Boolean);
   if (contactParts.length > 0) identity.appendChild(el("p", "contact", contactParts.join(SEPARATORS.contact[state.lang])));
-  header.appendChild(identity);
+  // La photo est flottante à droite (style.css) : elle doit venir avant le texte, sinon identité et présentation
+  // ne s'écouleraient pas à sa gauche.
   if (showPhoto) {
     const photo = el("img", "photo");
     photo.src = photoSrc;
     photo.alt = name;
     header.appendChild(photo);
   }
-  cv.appendChild(header);
-
+  header.appendChild(identity);
   if (isOn(CV.summary.id)) {
     const variant = CV.summary.variants.find((v) => v.id === state.summaryChoice);
-    cv.appendChild(editable("p", "summary", variant.key, t(variant.text), "summary"));
+    header.appendChild(editable("p", "summary", variant.key, t(variant.text), "summary"));
   }
+  cv.appendChild(header);
 }
 
 function renderExperience(cv) {
@@ -1176,12 +1204,14 @@ function renderLists(cv, onlyIds) {
       else li.appendChild(label);
       if (text.includes("\n") || item.bullets) {
         const sub = el("ul", "sub");
+        const lineIds = itemLineIds(item);
         text.split("\n").forEach((part, i) => {
+          if (state.hidden.has(lineIds[i])) return;
           const subItem = el("li");
           subItem.appendChild(editable("span", "", item.id + ":text" + i, part, "text"));
           sub.appendChild(subItem);
         });
-        li.appendChild(sub);
+        if (sub.childNodes.length > 0) li.appendChild(sub);
       } else if (text) {
         li.appendChild(document.createTextNode(SEPARATORS.label[state.lang]));
         li.appendChild(editable("span", "", item.id + ":text", text, "text"));

@@ -43,6 +43,7 @@ function resetApp(storage) {
   state.github = "";
   state.edits = validEdits(null);
   state.levels = defaultLevels();
+  state.hidden = new Set();
   applyProfile("all");
 }
 
@@ -170,10 +171,13 @@ function fillState() {
   state.custom = validCustom([
     { id: "cabcd0001", kind: "exp", title: "Mon stage", titleEn: "My internship", dates: "2026" },
     { id: "cabcd0002", kind: "bullet", text: "Une puce", parent: "cabcd0001" },
+    { id: "cabcd0003", kind: "item", list: CV.lists[0].id, label: "Engagement", text: "a\nb\nc" },
   ], ctx());
   applyCustom();
   state.checked.add("cabcd0001");
   state.checked.add("cabcd0002");
+  state.checked.add("cabcd0003");
+  state.hidden.add("cabcd0003-2");
 }
 
 test("aller-retour export / import : la progression est identique", () => {
@@ -266,13 +270,15 @@ function fakeDocument() {
   return { createElement: makeElement, createTextNode: makeText };
 }
 
-// Rend une liste contenant `item`, puis remet CV et state dans leur état d'origine.
-function renderOneListItem(item) {
+// Rend une liste contenant `item` (avec ces lignes masquées), puis remet CV et state dans leur état d'origine.
+function renderOneListItem(item, hiddenLines = []) {
   const fake = typeof document === "undefined";
   if (fake) globalThis.document = fakeDocument();
   const list = CV.lists[0];
   const oldLang = state.lang;
+  const oldHidden = state.hidden;
   state.lang = "fr";
+  state.hidden = new Set(hiddenLines);
   list.items.push(item);
   state.checked.add(item.id);
   try {
@@ -283,6 +289,7 @@ function renderOneListItem(item) {
     list.items.pop();
     state.checked.delete(item.id);
     state.lang = oldLang;
+    state.hidden = oldHidden;
     if (fake) delete globalThis.document;
   }
 }
@@ -309,6 +316,55 @@ test("renderLists : sans org ni dates, le format « nom : texte » reste inchang
   const container = renderOneListItem({ id: "zz-simple", label: { fr: "Nom" }, text: { fr: "Texte" } });
   assert(!findByClass(container, "row"), "pas de ligne de titre attendue");
   assert(container.textContent.includes("Nom" + SEPARATORS.label.fr + "Texte"), "format nom : texte attendu");
+});
+
+// --- Lignes masquables d'un élément de liste ---
+test("itemLineIds : un id par ligne seulement quand il y en a plusieurs, dans la langue la plus longue", () => {
+  same(itemLineIds({ id: "x", text: { fr: "une seule", en: "one" } }), []);
+  same(itemLineIds({ id: "x" }), []);
+  same(itemLineIds({ id: "x", text: { fr: "a\nb", en: "a\nb" } }), ["x-1", "x-2"]);
+  same(itemLineIds({ id: "x", text: { fr: "a\nb\nc", en: "a\nb" } }), ["x-1", "x-2", "x-3"]);
+});
+
+test("renderLists : une ligne masquée disparaît, les autres gardent leur place", () => {
+  const item = { id: "zz-lignes", label: { fr: "Nom" }, text: { fr: "L1\nL2\nL3" } };
+  same(findByClass(renderOneListItem(item), "sub").textContent, "L1L2L3");
+  same(findByClass(renderOneListItem(item, ["zz-lignes-2"]), "sub").textContent, "L1L3");
+});
+
+test("renderLists : toutes les lignes masquées, le titre reste sans sous-liste", () => {
+  const item = { id: "zz-titre", label: { fr: "Nom" }, text: { fr: "L1\nL2" } };
+  const container = renderOneListItem(item, ["zz-titre-1", "zz-titre-2"]);
+  assert(!findByClass(container, "sub"), "aucune sous-liste attendue");
+  assert(container.textContent.includes("Nom"), "le titre doit rester");
+});
+
+test("renderLists : un élément à une seule ligne n'est pas concerné par les lignes masquées", () => {
+  const item = { id: "zz-une", label: { fr: "Nom" }, text: { fr: "Texte" }, bullets: true };
+  same(findByClass(renderOneListItem(item, ["zz-une-1"]), "sub").textContent, "Texte");
+});
+
+test("une ancienne sauvegarde sans `hidden` laisse toutes les lignes visibles", () => {
+  resetApp(fakeStorage());
+  state.hidden.add("cabcd0003-2");
+  assert(applySaved({ lang: "fr", checked: ["summary"] }));
+  same([...state.hidden], []);
+});
+
+test("au chargement, les lignes masquées inconnues sont ignorées", () => {
+  resetApp(fakeStorage());
+  fillState();
+  assert(applySaved({ ...fullState(), hidden: ["cabcd0003-2", "n-existe-pas-1", 42] }));
+  same([...state.hidden], ["cabcd0003-2"]);
+});
+
+test("une configuration enregistre les lignes masquées", () => {
+  resetApp(fakeStorage());
+  fillState();
+  state.configs = validConfigs([{ name: "c", data: snapshot() }], ctx());
+  state.hidden = new Set();
+  applyConfig(0);
+  same([...state.hidden], ["cabcd0003-2"]);
 });
 
 test("un texte modifié sur l'org d'un élément de liste (id:org) est conservé au chargement", () => {
