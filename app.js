@@ -19,6 +19,15 @@ const PHOTO_KEY = "cv-modulaire-photo-v1"; // la photo a sa propre clé : inutil
 
 const PHOTO_MAX_SIDE = 800; // px : réduit la photo importée pour tenir dans le stockage local
 const PHOTO_QUALITY = 0.85;
+// Formats proposés au recadrage (largeur / hauteur). « landscape » reprend l'ancien cadre de 56 × 49 mm.
+const PHOTO_FORMATS = [
+  { id: "landscape", ratio: 56 / 49, label: "formatLandscape" },
+  { id: "square", ratio: 1, label: "formatSquare" },
+  { id: "portrait", ratio: 3 / 4, label: "formatPortrait" },
+];
+const PHOTO_MAX_ZOOM = 4;
+const CROP_PREVIEW_HEIGHT = 300; // px : hauteur de l'aperçu dans la fenêtre de recadrage
+const CROP_KEY_STEP = 0.03; // part de la zone déplacée à chaque flèche du clavier
 const CONFIGS_KEY = "cv-modulaire-configs-v1";
 // edits[langue][clé] = texte modifié ; la clé identifie un texte du CV (ex. "exp-dsin:title").
 const DEFAULT_LEVEL = "B2";
@@ -39,18 +48,18 @@ function dataContext() {
 
 const BASE = { summary: CV.summary, experience: CV.experience, education: CV.education, lists: CV.lists, languages: CV.languages };
 
-const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
+const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), hidden: new Set(), hiddenProfiles: new Set(), hiddenPhotos: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
 
 // --- Sauvegarde locale (facultative : le CV marche sans) ---
 // Tout ce qui constitue la progression (sélection + textes + photo importée).
 function fullState() {
-  return { lang: state.lang, checked: [...state.checked], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity };
+  return { lang: state.lang, checked: [...state.checked], hidden: [...state.hidden], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity, hiddenProfiles: [...state.hiddenProfiles], hiddenPhotos: [...state.hiddenPhotos] };
 }
 
 // Ce que garde une configuration : la sélection, plus le contenu des éléments ajoutés cochés
-// (pour pouvoir les retrouver s'ils ont été supprimés depuis). Textes modifiés, identité et photo restent globaux.
+// (pour pouvoir les retrouver s'ils ont été supprimés depuis). Textes modifiés, identité, photo et masquages restent globaux.
 function snapshot() {
-  const { photo, edits, custom, identity, ...selection } = fullState();
+  const { photo, edits, custom, identity, hiddenProfiles, hiddenPhotos, ...selection } = fullState();
   return { ...selection, levels: { ...selection.levels }, contact: { ...selection.contact }, customItems: custom.map((c) => ({ ...c })), customPhoto: Boolean(photo) };
 }
 
@@ -216,6 +225,9 @@ function applySaved(saved) {
   }
   const known = new Set(collectIds(true));
   state.checked = new Set(validIds(saved.checked).filter((id) => known.has(id)));
+  // Comme `checked`, remplacé à chaque chargement : une sauvegarde sans `hidden` (ancienne) laisse tout visible.
+  const knownLines = new Set(collectLineIds());
+  state.hidden = new Set(validIds(saved.hidden).filter((id) => knownLines.has(id)));
   if (saved.identity !== undefined) state.identity = validIdentity(saved.identity);
   state.levels = { ...defaultLevels(), ...validLevels(saved.levels, dataContext()) };
   if (saved.edits !== undefined) state.edits = validEdits(saved.edits, dataContext());
@@ -225,6 +237,9 @@ function applySaved(saved) {
   state.titleColor = validColor(saved.titleColor, state.titleColor);
   Object.assign(state.contact, validContact(saved.contact));
   if (saved.github !== undefined) state.github = validGithub(saved.github);
+  // Absents d'une configuration : ces masquages ne changent alors pas.
+  if (Array.isArray(saved.hiddenProfiles)) state.hiddenProfiles = new Set(validIds(saved.hiddenProfiles).filter((key) => Object.hasOwn(ALL_PROFILES, key)));
+  if (Array.isArray(saved.hiddenPhotos)) state.hiddenPhotos = new Set(validIds(saved.hiddenPhotos).filter((id) => CV.photos.some((p) => p.id === id)));
   if (CV.photos.some((p) => p.id === saved.photoChoice)) state.photoChoice = saved.photoChoice;
   if (CV.summary.variants.some((v) => v.id === saved.summaryChoice)) state.summaryChoice = saved.summaryChoice;
   const photo = validPhoto(saved.photo);
@@ -269,9 +284,38 @@ function collectIds(withFlagged) {
 }
 const allIds = () => collectIds(false);
 
+// Lignes d'un élément de liste (séparées par « \n » dans `text`). Quand il y en a plusieurs, chacune a un id dérivé
+// (« assoc-ae-2 ») et peut être masquée à part, comme une puce d'expérience. Le nombre est celui de la langue la plus
+// longue, pour que les ids ne dépendent pas de la langue affichée.
+function itemLineIds(item) {
+  if (!item.text) return [];
+  const count = Math.max(...["fr", "en"].map((lang) => (item.text[lang] || "").split("\n").length));
+  return count > 1 ? Array.from({ length: count }, (_, i) => item.id + "-" + (i + 1)) : [];
+}
+const collectLineIds = () => CV.lists.flatMap((list) => list.items.flatMap(itemLineIds));
+
 function applyProfile(key) {
   const profile = ALL_PROFILES[key];
   state.checked = new Set(profile.ids === "all" ? allIds() : profile.ids);
+  state.hidden = new Set();
+}
+
+// Profils prédéfinis et photos proposées viennent de data.js : on ne peut pas les supprimer depuis le navigateur,
+// seulement les masquer (et les rétablir).
+const visibleProfileKeys = () => Object.keys(ALL_PROFILES).filter((key) => !state.hiddenProfiles.has(key));
+const visiblePhotos = () => CV.photos.filter((p) => !state.hiddenPhotos.has(p.id));
+
+function hideProfile(key) {
+  state.hiddenProfiles.add(key);
+}
+
+// Si la photo masquée était celle affichée, on passe à la première encore visible (ou aucune).
+function hidePhoto(id) {
+  state.hiddenPhotos.add(id);
+  if (state.photoChoice === id) {
+    const first = visiblePhotos()[0];
+    state.photoChoice = first ? first.id : "";
+  }
 }
 
 const isOn = (id) => state.checked.has(id);
@@ -385,20 +429,40 @@ function setupEditing() {
 }
 
 // --- Configurations nommées et sauvegarde de secours ---
-function renderConfigs() {
-  const list = document.getElementById("config-list");
-  list.replaceChildren();
-  state.configs.forEach((config, index) => {
-    const item = el("li", "config-item");
-    item.appendChild(el("span", "config-name", config.name));
-    const load = UI_TEXT.configLoad[state.lang];
-    const del = UI_TEXT.configDelete[state.lang];
-    item.append(
-      chip(load, () => loadConfig(index), { label: load + " : " + config.name }),
-      chip(del, () => deleteConfig(index), { label: del + " : " + config.name }),
-    );
-    list.appendChild(item);
+// Bouton accolé d'un « × » qui supprime l'élément ; le nom accessible du × dit ce qu'il supprime.
+function withDelete(button, name, onDelete) {
+  const wrap = el("span", "chip-group");
+  const del = el("button", "chip-del", "×");
+  del.type = "button";
+  del.setAttribute("aria-label", UI_TEXT.configDelete[state.lang] + " : " + name);
+  del.addEventListener("click", onDelete);
+  wrap.append(button, del);
+  return wrap;
+}
+
+// Rangée « Profils » : profils prédéfinis visibles (data.js), puis profils créés (les configurations enregistrées).
+// Un profil est une action (il coche un lot d'éléments), pas un état : pas d'aria-pressed.
+function renderProfiles() {
+  const box = document.getElementById("profiles");
+  box.replaceChildren();
+  visibleProfileKeys().forEach((key) => {
+    const name = t(ALL_PROFILES[key].label);
+    const apply = chip(name, () => {
+      applyProfile(key);
+      saveState();
+      renderCV();
+      syncControls();
+    });
+    box.appendChild(withDelete(apply, name, () => {
+      hideProfile(key);
+      saveState();
+      renderProfiles();
+    }));
   });
+  state.configs.forEach((config, index) => {
+    box.appendChild(withDelete(chip(config.name, () => loadConfig(index)), config.name, () => deleteConfig(index)));
+  });
+  document.getElementById("profiles-restore").hidden = state.hiddenProfiles.size === 0;
 }
 
 function refreshAll() {
@@ -424,7 +488,7 @@ function saveConfig() {
   }
   saveConfigs();
   input.value = "";
-  renderConfigs();
+  renderProfiles();
 }
 
 // Remet les éléments ajoutés cochés dans la configuration (et les expériences parentes de leurs puces)
@@ -463,7 +527,7 @@ function deleteConfig(index) {
   if (!window.confirm(UI_TEXT.configDeleteConfirm[state.lang])) return;
   state.configs.splice(index, 1);
   saveConfigs();
-  renderConfigs();
+  renderProfiles();
 }
 
 function buildBackup() {
@@ -493,6 +557,8 @@ function emptyProgress() {
     contact: { address: true, phone: true, email: true, github: true },
     photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "",
     summaryChoice: CV.summary.variants[0].id,
+    hiddenProfiles: [],
+    hiddenPhotos: [],
   };
 }
 
@@ -530,6 +596,11 @@ function setupConfigs() {
   document.getElementById("config-save").addEventListener("click", saveConfig);
   document.getElementById("config-name").addEventListener("keydown", (event) => {
     if (event.key === "Enter") saveConfig();
+  });
+  document.getElementById("profiles-restore").addEventListener("click", () => {
+    state.hiddenProfiles.clear();
+    saveState();
+    renderProfiles();
   });
   document.getElementById("backup-export").addEventListener("click", exportBackup);
   const file = document.getElementById("backup-file");
@@ -655,6 +726,7 @@ function removeCustom(id) {
   applyCustom();
   removed.forEach((gone) => {
     state.checked.delete(gone);
+    state.hidden.forEach((lineId) => { if (lineId.startsWith(gone + "-")) state.hidden.delete(lineId); });
     delete state.levels[gone];
     ["fr", "en"].forEach((lang) => {
       Object.keys(state.edits[lang]).filter((key) => key === gone || key.startsWith(gone + ":")).forEach((key) => delete state.edits[lang][key]);
@@ -785,31 +857,186 @@ function photoErrorText(err) {
   return UI_TEXT.photoError[state.lang];
 }
 
-// Redimensionne l'image importée et la renvoie en data URL JPEG. Le passage par un canvas ré-encode
-// l'image : ce qu'on stocke est toujours un JPEG que l'on a produit nous-mêmes.
-function readPhoto(file) {
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+// Zone de l'image d'origine à garder, en pixels de l'image : { x, y, w, h }.
+// À zoom 1, c'est le plus grand rectangle au format `ratio` qui tient dans l'image ; zoomer le réduit.
+// (centerX, centerY) est le centre souhaité : il est ramené dans l'image si la zone en sortait.
+function cropRect(imgW, imgH, ratio, zoom, centerX, centerY) {
+  const z = clamp(zoom, 1, PHOTO_MAX_ZOOM);
+  const fullW = imgW / imgH > ratio ? imgH * ratio : imgW;
+  const w = fullW / z;
+  const h = w / ratio;
+  const x = clamp(centerX - w / 2, 0, imgW - w);
+  const y = clamp(centerY - h / 2, 0, imgH - h);
+  return { x, y, w, h };
+}
+
+// Importe une photo : décodage, recadrage par l'utilisateur, puis ré-encodage.
+// Renvoie la data URL JPEG, ou null si l'utilisateur a annulé le recadrage.
+async function readPhoto(file) {
+  const img = await loadImage(file);
+  const rect = await openCropper(img);
+  return rect ? exportCrop(img, rect) : null;
+}
+
+function loadImage(file) {
   return new Promise((resolve, reject) => {
     // Contrôles avant tout décodage : on ne charge pas un fichier inutilement lourd ou d'un type non prévu.
     if (!PHOTO_TYPES.includes(file.type)) return reject(photoError("type"));
     if (file.size > MAX_PHOTO_FILE_BYTES) return reject(photoError("size"));
     const url = URL.createObjectURL(file);
     const img = new Image();
+    // Une fois l'image décodée, elle reste utilisable même après la libération de l'URL temporaire.
     img.onload = () => {
-      const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.width, img.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(url);
-      const result = validPhoto(canvas.toDataURL("image/jpeg", PHOTO_QUALITY));
-      if (result) resolve(result);
-      else reject(photoError("size"));
+      resolve(img);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
       reject(photoError("unreadable"));
     };
     img.src = url;
+  });
+}
+
+// Découpe la zone choisie, la réduit et la renvoie en data URL JPEG. Le passage par un canvas ré-encode
+// l'image : ce qu'on stocke est toujours un JPEG que l'on a produit nous-mêmes.
+function exportCrop(img, rect) {
+  const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(rect.w, rect.h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(rect.w * scale);
+  canvas.height = Math.round(rect.h * scale);
+  canvas.getContext("2d").drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
+  const result = validPhoto(canvas.toDataURL("image/jpeg", PHOTO_QUALITY));
+  if (!result) throw photoError("size");
+  return result;
+}
+
+// Fenêtre modale de recadrage : format, zoom, déplacement à la souris / au doigt / aux flèches.
+// Renvoie (promesse) la zone choisie, ou null si l'utilisateur annule (bouton ou touche Échap).
+function openCropper(img) {
+  return new Promise((resolve) => {
+    const lang = state.lang;
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+    let format = PHOTO_FORMATS[0];
+    let zoom = 1;
+    let centerX = imgW / 2;
+    let centerY = imgH / 2;
+    let result = null;
+
+    const dialog = el("dialog", "crop-dialog");
+    dialog.setAttribute("aria-labelledby", "crop-title");
+    const title = el("h2", "", UI_TEXT.cropTitle[lang]);
+    title.id = "crop-title";
+
+    const canvas = el("canvas", "crop-canvas");
+    canvas.tabIndex = 0;
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", UI_TEXT.cropFrame[lang]);
+    const current = () => cropRect(imgW, imgH, format.ratio, zoom, centerX, centerY);
+
+    function draw() {
+      const rect = current();
+      // On garde le centre réellement utilisé : sinon, en tirant au-delà du bord, l'écart s'accumulerait
+      // et il faudrait revenir d'autant avant que l'image ne bouge à nouveau.
+      centerX = rect.x + rect.w / 2;
+      centerY = rect.y + rect.h / 2;
+      const cssW = Math.round(CROP_PREVIEW_HEIGHT * format.ratio);
+      const dpr = window.devicePixelRatio || 1; // aperçu net sur les écrans haute densité
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(CROP_PREVIEW_HEIGHT * dpr);
+      canvas.style.width = cssW + "px"; // la hauteur suit (height: auto) : pas de déformation si l'écran est étroit
+      canvas.getContext("2d").drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
+    }
+
+    // Déplacer l'aperçu d'un pixel écran revient à déplacer la zone de (largeur de la zone / largeur affichée)
+    // pixels de l'image, dans le sens inverse : on tire l'image, pas le cadre.
+    function moveBy(dx, dy) {
+      const scale = current().w / canvas.clientWidth;
+      centerX -= dx * scale;
+      centerY -= dy * scale;
+      draw();
+    }
+
+    let lastPointer = null;
+    canvas.addEventListener("pointerdown", (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      lastPointer = { x: e.clientX, y: e.clientY };
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!lastPointer) return;
+      moveBy(e.clientX - lastPointer.x, e.clientY - lastPointer.y);
+      lastPointer = { x: e.clientX, y: e.clientY };
+    });
+    const stopDrag = () => { lastPointer = null; };
+    canvas.addEventListener("pointerup", stopDrag);
+    canvas.addEventListener("pointercancel", stopDrag);
+
+    const KEY_MOVES = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    canvas.addEventListener("keydown", (e) => {
+      const move = KEY_MOVES[e.key];
+      if (!move) return;
+      e.preventDefault();
+      const step = canvas.clientWidth * CROP_KEY_STEP;
+      moveBy(move[0] * step, move[1] * step);
+    });
+
+    const formats = el("div", "options");
+    const formatButtons = PHOTO_FORMATS.map((f) => {
+      const btn = el("button", "chip", UI_TEXT[f.label][lang]);
+      btn.type = "button";
+      btn.setAttribute("aria-pressed", String(f === format));
+      btn.addEventListener("click", () => {
+        format = f;
+        formatButtons.forEach((b, i) => b.setAttribute("aria-pressed", String(PHOTO_FORMATS[i] === format)));
+        draw();
+      });
+      formats.appendChild(btn);
+      return btn;
+    });
+
+    const zoomLabel = el("label", "level crop-zoom");
+    const zoomInput = el("input");
+    zoomInput.type = "range";
+    zoomInput.min = "1";
+    zoomInput.max = String(PHOTO_MAX_ZOOM);
+    zoomInput.step = "0.01";
+    zoomInput.value = "1";
+    zoomInput.addEventListener("input", () => {
+      zoom = Number(zoomInput.value);
+      draw();
+    });
+    zoomLabel.append(el("span", "", UI_TEXT.cropZoom[lang]), zoomInput);
+
+    const buttons = el("div", "crop-buttons");
+    const cancel = el("button", "chip", UI_TEXT.cropCancel[lang]);
+    cancel.type = "button";
+    cancel.addEventListener("click", () => dialog.close());
+    const confirm = el("button", "primary", UI_TEXT.cropConfirm[lang]);
+    confirm.type = "button";
+    confirm.addEventListener("click", () => {
+      result = current();
+      dialog.close();
+    });
+    buttons.append(cancel, confirm);
+
+    // « close » est déclenché dans tous les cas (Valider, Annuler, Échap) : un seul endroit pour conclure.
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      resolve(result);
+    });
+
+    const stage = el("div", "crop-stage");
+    stage.appendChild(canvas);
+    dialog.append(title, el("p", "hint", UI_TEXT.cropHint[lang]), formats, stage, zoomLabel, buttons);
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    draw();
+    canvas.focus();
   });
 }
 
@@ -852,11 +1079,14 @@ function photoControls() {
     message.textContent = "";
     if (!file.files[0]) return;
     try {
-      state.photo = await readPhoto(file.files[0]);
-      savePhoto();
-      saveState();
-      renderCV();
-      syncControls();
+      const photo = await readPhoto(file.files[0]);
+      if (photo) {
+        state.photo = photo;
+        savePhoto();
+        saveState();
+        renderCV();
+        syncControls();
+      }
     } catch (err) {
       console.warn("Import de photo impossible :", err);
       message.textContent = photoErrorText(err);
@@ -867,18 +1097,47 @@ function photoControls() {
   const actions = el("div", "photo-actions");
   actions.append(chip(UI_TEXT.importPhoto[state.lang], () => file.click(), { disabled: noPhoto }), file);
 
-  // Photos fournies : en choisir une remplace la photo importée.
+  // Photo importée : toujours celle affichée quand elle existe (choisir une photo fournie l'efface).
+  // Ce n'est pas une action, d'où un simple libellé ; le × l'efface définitivement de ce navigateur.
   const choices = el("div", "photo-actions");
-  CV.photos.forEach((photo) => {
-    choices.appendChild(chip(t(photo.label), () => {
+  const importedName = UI_TEXT.importedPhoto[state.lang];
+  const imported = withDelete(el("span", "chip current", importedName), importedName, () => {
+    if (!window.confirm(UI_TEXT.importedPhotoDeleteConfirm[state.lang])) return;
+    state.photo = null;
+    savePhoto();
+    saveState();
+    renderCV();
+    syncControls();
+  });
+  onSync(() => { imported.hidden = !state.photo; });
+  choices.appendChild(imported);
+
+  // Photos fournies : en choisir une remplace la photo importée ; le × la masque seulement (fichier sur le serveur).
+  visiblePhotos().forEach((photo) => {
+    const name = t(photo.label);
+    const select = chip(name, () => {
       state.photoChoice = photo.id;
       state.photo = null;
       savePhoto();
       saveState();
       renderCV();
       syncControls();
-    }, { disabled: noPhoto, pressed: () => !state.photo && state.photoChoice === photo.id }));
+    }, { disabled: noPhoto, pressed: () => !state.photo && state.photoChoice === photo.id });
+    choices.appendChild(withDelete(select, name, () => {
+      hidePhoto(photo.id);
+      saveState();
+      renderControls();
+      renderCV();
+    }));
   });
+  if (state.hiddenPhotos.size > 0) {
+    actions.appendChild(chip(UI_TEXT.photosRestore[state.lang], () => {
+      state.hiddenPhotos.clear();
+      saveState();
+      renderControls();
+      renderCV();
+    }));
+  }
   box.append(el("p", "label", UI_TEXT.photoChoices[state.lang]), choices, actions, message);
   return box;
 }
@@ -982,6 +1241,18 @@ function listControls(list) {
     const itemBox = itemCheckbox(item.id, t(item.label), { flag: item.flag });
     if (item.custom) itemBox.appendChild(removeButton(item.id, t(item.label)));
     box.appendChild(itemBox);
+    // Une case par ligne (cochée = visible) : on masque une ligne sans toucher aux autres.
+    const lines = t(item.text).split("\n");
+    itemLineIds(item).forEach((lineId, i) => {
+      if (!lines[i]) return;
+      box.appendChild(checkbox(lines[i], () => !state.hidden.has(lineId), (on) => {
+        if (on) state.hidden.delete(lineId);
+        else state.hidden.add(lineId);
+        saveState();
+        renderCV();
+        syncControls();
+      }, { className: "child", enabled: () => isOn(item.id) }));
+    });
   });
   const hint = UI_TEXT.addHint[state.lang] + " " + UI_TEXT.multilineHint[state.lang];
   box.appendChild(addForm("list-" + list.id, UI_TEXT.add[state.lang], [FIELD("label", true), FIELD("dates"), FIELD("text", false, "multiline", true)], (v) => addCustom({ kind: "item", list: list.id, ...v }), hint));
@@ -1028,6 +1299,8 @@ function renderToolbar() {
   setText("label-configs", UI_TEXT.configsLabel[lang]);
   setText("configs-hint", UI_TEXT.configsHint[lang]);
   setText("config-save", UI_TEXT.configSave[lang]);
+  setText("profiles-hint", UI_TEXT.profilesHint[lang]);
+  setText("profiles-restore", UI_TEXT.profilesRestore[lang]);
   setText("backup-export", UI_TEXT.backupExport[lang]);
   setText("backup-import", UI_TEXT.backupImport[lang]);
   setText("backup-note", UI_TEXT.backupNote[lang]);
@@ -1041,24 +1314,12 @@ function renderToolbar() {
   configName.setAttribute("aria-label", UI_TEXT.configName[lang]);
   configName.maxLength = LIMITS.configName;
   setSaveStatus(!state.saveFailed);
-  renderConfigs();
+  renderProfiles();
   document.documentElement.lang = lang;
   document.title = pageTitle();
 
   document.querySelectorAll("[data-lang]").forEach((btn) => {
     btn.setAttribute("aria-pressed", String(btn.dataset.lang === lang));
-  });
-
-  // Un profil est une action (il coche un lot d'éléments), pas un état : pas d'aria-pressed.
-  const profileBox = document.getElementById("profiles");
-  profileBox.replaceChildren();
-  Object.keys(ALL_PROFILES).forEach((key) => {
-    profileBox.appendChild(chip(t(ALL_PROFILES[key].label), () => {
-      applyProfile(key);
-      saveState();
-      renderCV();
-      syncControls();
-    }));
   });
 }
 
@@ -1091,10 +1352,10 @@ function entryRow(item) {
 }
 
 function renderHeader(cv) {
-  const providedPhoto = CV.photos.find((p) => p.id === state.photoChoice);
+  const providedPhoto = visiblePhotos().find((p) => p.id === state.photoChoice);
   const photoSrc = state.photo || (providedPhoto && providedPhoto.src);
   const showPhoto = state.showPhoto && Boolean(photoSrc);
-  const header = el("header", showPhoto ? "cv-header" : "cv-header no-photo");
+  const header = el("header", "cv-header");
   const identity = el("div", "identity");
   const name = state.identity.name || CV.name;
   identity.appendChild(el("h1", "", name));
@@ -1106,19 +1367,20 @@ function renderHeader(cv) {
     state.contact.github && state.github && state.github.replace(/^https?:\/\//, ""),
   ].filter(Boolean);
   if (contactParts.length > 0) identity.appendChild(el("p", "contact", contactParts.join(SEPARATORS.contact[state.lang])));
-  header.appendChild(identity);
+  // La photo est flottante à droite (style.css) : elle doit venir avant le texte, sinon identité et présentation
+  // ne s'écouleraient pas à sa gauche.
   if (showPhoto) {
     const photo = el("img", "photo");
     photo.src = photoSrc;
     photo.alt = name;
     header.appendChild(photo);
   }
-  cv.appendChild(header);
-
+  header.appendChild(identity);
   if (isOn(CV.summary.id)) {
     const variant = CV.summary.variants.find((v) => v.id === state.summaryChoice);
-    cv.appendChild(editable("p", "summary", variant.key, t(variant.text), "summary"));
+    header.appendChild(editable("p", "summary", variant.key, t(variant.text), "summary"));
   }
+  cv.appendChild(header);
 }
 
 function renderExperience(cv) {
@@ -1176,12 +1438,14 @@ function renderLists(cv, onlyIds) {
       else li.appendChild(label);
       if (text.includes("\n") || item.bullets) {
         const sub = el("ul", "sub");
+        const lineIds = itemLineIds(item);
         text.split("\n").forEach((part, i) => {
+          if (state.hidden.has(lineIds[i])) return;
           const subItem = el("li");
           subItem.appendChild(editable("span", "", item.id + ":text" + i, part, "text"));
           sub.appendChild(subItem);
         });
-        li.appendChild(sub);
+        if (sub.childNodes.length > 0) li.appendChild(sub);
       } else if (text) {
         li.appendChild(document.createTextNode(SEPARATORS.label[state.lang]));
         li.appendChild(editable("span", "", item.id + ":text", text, "text"));

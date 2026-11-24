@@ -166,6 +166,7 @@ function validConfigs(raw, ctx) {
     .map((c) => ({ name: c.name.trim(), data: {
       lang: c.data.lang,
       checked: validIds(c.data.checked),
+      hidden: validIds(c.data.hidden),
       levels: validLevels(c.data.levels, ctx),
       showPhoto: c.data.showPhoto !== false,
       onePage: c.data.onePage === true,

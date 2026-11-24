@@ -43,8 +43,19 @@ function resetApp(storage) {
   state.github = "";
   state.edits = validEdits(null);
   state.levels = defaultLevels();
+  state.hidden = new Set();
+  state.hiddenProfiles = new Set();
+  state.hiddenPhotos = new Set();
   applyProfile("all");
 }
+
+// Remplace temporairement les photos proposées (les données d'exemple n'en ont aucune).
+function withPhotos(photos, fn) {
+  const previous = CV.photos;
+  CV.photos = photos;
+  try { fn(); } finally { CV.photos = previous; }
+}
+const TWO_PHOTOS = [{ id: "a", src: "a.jpg", label: { fr: "A" } }, { id: "b", src: "b.jpg", label: { fr: "B" } }];
 
 const PIXEL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=";
 
@@ -170,10 +181,13 @@ function fillState() {
   state.custom = validCustom([
     { id: "cabcd0001", kind: "exp", title: "Mon stage", titleEn: "My internship", dates: "2026" },
     { id: "cabcd0002", kind: "bullet", text: "Une puce", parent: "cabcd0001" },
+    { id: "cabcd0003", kind: "item", list: CV.lists[0].id, label: "Engagement", text: "a\nb\nc" },
   ], ctx());
   applyCustom();
   state.checked.add("cabcd0001");
   state.checked.add("cabcd0002");
+  state.checked.add("cabcd0003");
+  state.hidden.add("cabcd0003-2");
 }
 
 test("aller-retour export / import : la progression est identique", () => {
@@ -266,13 +280,15 @@ function fakeDocument() {
   return { createElement: makeElement, createTextNode: makeText };
 }
 
-// Rend une liste contenant `item`, puis remet CV et state dans leur état d'origine.
-function renderOneListItem(item) {
+// Rend une liste contenant `item` (avec ces lignes masquées), puis remet CV et state dans leur état d'origine.
+function renderOneListItem(item, hiddenLines = []) {
   const fake = typeof document === "undefined";
   if (fake) globalThis.document = fakeDocument();
   const list = CV.lists[0];
   const oldLang = state.lang;
+  const oldHidden = state.hidden;
   state.lang = "fr";
+  state.hidden = new Set(hiddenLines);
   list.items.push(item);
   state.checked.add(item.id);
   try {
@@ -283,6 +299,7 @@ function renderOneListItem(item) {
     list.items.pop();
     state.checked.delete(item.id);
     state.lang = oldLang;
+    state.hidden = oldHidden;
     if (fake) delete globalThis.document;
   }
 }
@@ -301,7 +318,7 @@ test("renderLists : l'environnement d'un projet (org) s'affiche sur la ligne de 
   const container = renderOneListItem({ id: "zz-proj", label: { fr: "Nom" }, org: { fr: "Env" }, text: { fr: "Phrase" }, bullets: true });
   const row = findByClass(container, "row");
   assert(row, "la ligne de titre (row) est absente");
-  same(row.textContent, "Nom - Env");
+  same(row.textContent, "Nom – Env");
   same(findByClass(container, "sub").textContent, "Phrase");
 });
 
@@ -311,10 +328,125 @@ test("renderLists : sans org ni dates, le format « nom : texte » reste inchang
   assert(container.textContent.includes("Nom" + SEPARATORS.label.fr + "Texte"), "format nom : texte attendu");
 });
 
+// --- Lignes masquables d'un élément de liste ---
+test("itemLineIds : un id par ligne seulement quand il y en a plusieurs, dans la langue la plus longue", () => {
+  same(itemLineIds({ id: "x", text: { fr: "une seule", en: "one" } }), []);
+  same(itemLineIds({ id: "x" }), []);
+  same(itemLineIds({ id: "x", text: { fr: "a\nb", en: "a\nb" } }), ["x-1", "x-2"]);
+  same(itemLineIds({ id: "x", text: { fr: "a\nb\nc", en: "a\nb" } }), ["x-1", "x-2", "x-3"]);
+});
+
+test("renderLists : une ligne masquée disparaît, les autres gardent leur place", () => {
+  const item = { id: "zz-lignes", label: { fr: "Nom" }, text: { fr: "L1\nL2\nL3" } };
+  same(findByClass(renderOneListItem(item), "sub").textContent, "L1L2L3");
+  same(findByClass(renderOneListItem(item, ["zz-lignes-2"]), "sub").textContent, "L1L3");
+});
+
+test("renderLists : toutes les lignes masquées, le titre reste sans sous-liste", () => {
+  const item = { id: "zz-titre", label: { fr: "Nom" }, text: { fr: "L1\nL2" } };
+  const container = renderOneListItem(item, ["zz-titre-1", "zz-titre-2"]);
+  assert(!findByClass(container, "sub"), "aucune sous-liste attendue");
+  assert(container.textContent.includes("Nom"), "le titre doit rester");
+});
+
+test("renderLists : un élément à une seule ligne n'est pas concerné par les lignes masquées", () => {
+  const item = { id: "zz-une", label: { fr: "Nom" }, text: { fr: "Texte" }, bullets: true };
+  same(findByClass(renderOneListItem(item, ["zz-une-1"]), "sub").textContent, "Texte");
+});
+
+test("une ancienne sauvegarde sans `hidden` laisse toutes les lignes visibles", () => {
+  resetApp(fakeStorage());
+  state.hidden.add("cabcd0003-2");
+  assert(applySaved({ lang: "fr", checked: ["summary"] }));
+  same([...state.hidden], []);
+});
+
+test("au chargement, les lignes masquées inconnues sont ignorées", () => {
+  resetApp(fakeStorage());
+  fillState();
+  assert(applySaved({ ...fullState(), hidden: ["cabcd0003-2", "n-existe-pas-1", 42] }));
+  same([...state.hidden], ["cabcd0003-2"]);
+});
+
+test("une configuration enregistre les lignes masquées", () => {
+  resetApp(fakeStorage());
+  fillState();
+  state.configs = validConfigs([{ name: "c", data: snapshot() }], ctx());
+  state.hidden = new Set();
+  applyConfig(0);
+  same([...state.hidden], ["cabcd0003-2"]);
+});
+
 test("un texte modifié sur l'org d'un élément de liste (id:org) est conservé au chargement", () => {
   const id = CV.lists[0].items[0].id;
   const edits = validEdits({ fr: { [id + ":org"]: "Env modifié" }, en: {} }, dataContext());
   same(edits.fr[id + ":org"], "Env modifié");
+});
+
+// --- Recadrage de la photo ---
+test("cropRect : image paysage, format carré, zoom 1, centrée", () => {
+  same(cropRect(400, 200, 1, 1, 200, 100), { x: 100, y: 0, w: 200, h: 200 });
+});
+
+test("cropRect : image verticale, format portrait 3:4, zoom 2", () => {
+  // Plus grand 3:4 dans 300 × 600 : 300 × 400 ; zoom 2 → 150 × 200, centré sur (150, 300).
+  same(cropRect(300, 600, 3 / 4, 2, 150, 300), { x: 75, y: 200, w: 150, h: 200 });
+});
+
+test("cropRect : un centre hors de l'image est ramené au bord", () => {
+  same(cropRect(400, 200, 1, 2, -500, 9999), { x: 0, y: 100, w: 100, h: 100 });
+  same(cropRect(400, 200, 1, 2, 9999, -500), { x: 300, y: 0, w: 100, h: 100 });
+});
+
+test("cropRect : le zoom est borné entre 1 et le maximum", () => {
+  same(cropRect(400, 200, 1, 0.1, 200, 100), cropRect(400, 200, 1, 1, 200, 100));
+  same(cropRect(400, 400, 1, 99, 200, 200).w, 400 / PHOTO_MAX_ZOOM);
+});
+
+// --- Profils et photos masqués ---
+test("masquer un profil prédéfini le retire de la liste, et il est retenu au rechargement", () => {
+  const storage = fakeStorage();
+  resetApp(storage);
+  hideProfile("all");
+  assert(!visibleProfileKeys().includes("all"), "« Tout » doit être masqué");
+  assert(visibleProfileKeys().includes("empty"), "« Vide » doit rester");
+  saveState();
+  state.hiddenProfiles = new Set();
+  loadState();
+  assert(state.hiddenProfiles.has("all"), "le masquage doit survivre au rechargement");
+});
+
+test("au chargement, les profils et photos masqués inconnus sont ignorés", () => {
+  resetApp(fakeStorage());
+  applySaved({ lang: "fr", checked: [], hiddenProfiles: ["all", "nexistepas"], hiddenPhotos: ["fantome"] });
+  same([...state.hiddenProfiles], ["all"]);
+  same([...state.hiddenPhotos], []);
+});
+
+test("une configuration (profil créé) ne garde pas les profils ni les photos masqués", () => {
+  resetApp(fakeStorage());
+  hideProfile("empty");
+  const data = snapshot();
+  assert(!("hiddenProfiles" in data) && !("hiddenPhotos" in data), "masquages globaux, pas par profil");
+});
+
+test("masquer la photo affichée bascule sur la première photo encore visible", () => {
+  withPhotos(TWO_PHOTOS, () => {
+    resetApp(fakeStorage());
+    state.photoChoice = "a";
+    hidePhoto("a");
+    same(state.photoChoice, "b");
+    same(visiblePhotos().map((p) => p.id), ["b"]);
+    hidePhoto("b");
+    same(state.photoChoice, "", "plus aucune photo proposée visible");
+  });
+});
+
+test("importer une sauvegarde remet les profils et photos masqués à zéro", () => {
+  resetApp(fakeStorage());
+  hideProfile("all");
+  assert(applyBackup({ app: "cv-modulaire", version: 1, state: { lang: "fr", checked: [] }, configs: [] }));
+  same(state.hiddenProfiles.size, 0);
 });
 
 // --- Exécution ---
