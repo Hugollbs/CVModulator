@@ -373,6 +373,26 @@ test("un texte modifié sur l'org d'un élément de liste (id:org) est conservé
   same(edits.fr[id + ":org"], "Env modifié");
 });
 
+// --- Recadrage de la photo ---
+test("cropRect : image paysage, format carré, zoom 1, centrée", () => {
+  same(cropRect(400, 200, 1, 1, 200, 100), { x: 100, y: 0, w: 200, h: 200 });
+});
+
+test("cropRect : image verticale, format portrait 3:4, zoom 2", () => {
+  // Plus grand 3:4 dans 300 × 600 : 300 × 400 ; zoom 2 → 150 × 200, centré sur (150, 300).
+  same(cropRect(300, 600, 3 / 4, 2, 150, 300), { x: 75, y: 200, w: 150, h: 200 });
+});
+
+test("cropRect : un centre hors de l'image est ramené au bord", () => {
+  same(cropRect(400, 200, 1, 2, -500, 9999), { x: 0, y: 100, w: 100, h: 100 });
+  same(cropRect(400, 200, 1, 2, 9999, -500), { x: 300, y: 0, w: 100, h: 100 });
+});
+
+test("cropRect : le zoom est borné entre 1 et le maximum", () => {
+  same(cropRect(400, 200, 1, 0.1, 200, 100), cropRect(400, 200, 1, 1, 200, 100));
+  same(cropRect(400, 400, 1, 99, 200, 200).w, 400 / PHOTO_MAX_ZOOM);
+});
+
 // --- Exécution ---
 function runTests() {
   return tests.map(({ name, fn }) => {

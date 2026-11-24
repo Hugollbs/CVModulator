@@ -90,7 +90,10 @@ body {
 .identity { text-align: left; }
 .identity h1 { margin: 0 0 1.5mm; font-size: 24pt; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
 .contact { margin: 0; font-size: 9.5pt; color: var(--cv-muted); }
-.photo { float: right; width: 56mm; height: 49mm; object-fit: cover; margin: 0 0 3mm 6mm; }
+/* Hauteur fixe, largeur déduite du format de l'image : une photo verticale reste aussi haute qu'une photo
+   paysage, mais plus étroite, et laisse plus de place au texte. Les bornes limitent les formats extrêmes
+   (rognés au centre par object-fit dans ce cas seulement). */
+.photo { float: right; height: 48mm; width: auto; min-width: 30mm; max-width: 60mm; object-fit: cover; margin: 0 0 3mm 6mm; }
 
 /* text-wrap: pretty évite un mot seul sur la dernière ligne (ignoré sans risque par les navigateurs qui ne le gèrent pas) */
 .summary { margin: 3mm 0 0; text-align: left; text-wrap: pretty; }
@@ -210,3 +213,17 @@ body {
 /* Erreur de démarrage : visible même si le reste de la page n'a pas pu se construire */
 .fatal { margin: 16px; padding: 14px 16px; border: 1px solid #bf4d43; border-radius: 8px; background: #fdf1ef; color: #7a2b24; font-size: 14px; grid-column: 1 / -1; }
 @media print { .fatal { display: none; } }
+
+/* Fenêtre de recadrage de la photo importée */
+.crop-dialog { max-width: min(440px, calc(100vw - 32px)); border: 1px solid var(--ivory-dark); border-radius: 14px; padding: 20px 22px; background: var(--ivory); color: var(--slate); font-family: var(--sans); }
+.crop-dialog::backdrop { background: rgba(20, 20, 19, 0.45); }
+.crop-dialog h2 { margin: 0 0 6px; font-family: var(--serif); font-weight: 400; font-size: 22px; }
+.crop-stage { display: flex; justify-content: center; margin: 12px 0; padding: 10px; border-radius: 10px; background: var(--ivory-medium); }
+/* touch-action: none empêche le navigateur de faire défiler la page pendant qu'on fait glisser l'image au doigt */
+.crop-canvas { max-width: 100%; height: auto; cursor: grab; touch-action: none; box-shadow: 0 1px 4px rgba(20, 20, 19, 0.2); }
+.crop-canvas:active { cursor: grabbing; }
+.crop-canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.level.crop-zoom { margin: 0 0 14px; }
+.crop-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+.crop-buttons .primary { width: auto; padding: 8px 20px; }
+@media print { .crop-dialog { display: none; } }
