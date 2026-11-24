@@ -1,5 +1,12 @@
 /* Interface : palette du site Anthropic (ivoire, ardoise, argile).
    Polices Anthropic propriétaires -> Newsreader (serif) et Inter (sans) en substitut. */
+
+/* Polices hébergées avec le site (fichiers dans fonts/, licence OFL) : aucune requête vers Google, et elles
+   s'affichent même quand le serveur n'autorise que ses propres fichiers (CSP font-src 'self').
+   Fichiers « variables » : une seule fonte couvre toutes les graisses de la plage indiquée. */
+@font-face { font-family: "Inter"; src: url("fonts/inter-latin-wght.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Newsreader"; src: url("fonts/newsreader-latin-wght.woff2") format("woff2"); font-weight: 200 800; font-style: normal; font-display: swap; }
+
 :root {
   --ivory: #faf9f5;
   --ivory-medium: #f0eee6;
