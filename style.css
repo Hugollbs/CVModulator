@@ -178,9 +178,6 @@ body {
 /* Configurations enregistrées */
 .config-save { display: flex; gap: 8px; margin: 8px 0; }
 .config-save input { flex: 1; min-width: 0; border: 1px solid var(--ivory-dark); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; background: #fff; color: var(--slate); }
-.config-list { list-style: none; margin: 0 0 10px; padding: 0; }
-.config-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 13px; }
-.config-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #save-status.error { color: #bf4d43; }
 
 /* Blocs repliables du panneau (Configurations, Textes) */
@@ -227,3 +224,14 @@ body {
 .crop-buttons { display: flex; gap: 10px; justify-content: flex-end; }
 .crop-buttons .primary { width: auto; padding: 8px 20px; }
 @media print { .crop-dialog { display: none; } }
+
+/* Bouton accolé d'un « × » de suppression (profils, photos) */
+.chip-group { display: inline-flex; }
+.chip-group[hidden] { display: none; }
+.chip-group > .chip { border-radius: 999px 0 0 999px; }
+.chip-del { border: 1px solid var(--ivory-dark); border-left: 0; border-radius: 0 999px 999px 0; background: var(--ivory-medium); padding: 0 10px; font: inherit; font-size: 14px; line-height: 1; color: var(--cloud); cursor: pointer; }
+.chip-del:hover { color: #bf4d43; border-color: #bf4d43; }
+.chip-del:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Libellé de la photo importée : affichée, mais ce n'est pas un bouton */
+.chip.current { cursor: default; background: var(--slate); color: var(--ivory); border-color: var(--slate); }
+#profiles-restore { margin-bottom: 8px; }

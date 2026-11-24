@@ -48,18 +48,18 @@ function dataContext() {
 
 const BASE = { summary: CV.summary, experience: CV.experience, education: CV.education, lists: CV.lists, languages: CV.languages };
 
-const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), hidden: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
+const state = { custom: [], identity: { name: "", address: "", phone: "", email: "" }, contact: { address: true, phone: true, email: true, github: true }, github: "", configs: [], blocked: new Set(), saveFailed: false, lang: "fr", checked: new Set(), hidden: new Set(), hiddenProfiles: new Set(), hiddenPhotos: new Set(), levels: {}, showPhoto: true, onePage: false, showSubtitle: true, titleColor: DEFAULT_TITLE_COLOR, photo: null, photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "", summaryChoice: CV.summary.variants[0].id, edits: { fr: {}, en: {} } };
 
 // --- Sauvegarde locale (facultative : le CV marche sans) ---
 // Tout ce qui constitue la progression (sélection + textes + photo importée).
 function fullState() {
-  return { lang: state.lang, checked: [...state.checked], hidden: [...state.hidden], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity };
+  return { lang: state.lang, checked: [...state.checked], hidden: [...state.hidden], levels: state.levels, showPhoto: state.showPhoto, onePage: state.onePage, showSubtitle: state.showSubtitle, titleColor: state.titleColor, photo: state.photo, photoChoice: state.photoChoice, summaryChoice: state.summaryChoice, contact: state.contact, github: state.github, edits: state.edits, custom: state.custom, identity: state.identity, hiddenProfiles: [...state.hiddenProfiles], hiddenPhotos: [...state.hiddenPhotos] };
 }
 
 // Ce que garde une configuration : la sélection, plus le contenu des éléments ajoutés cochés
-// (pour pouvoir les retrouver s'ils ont été supprimés depuis). Textes modifiés, identité et photo restent globaux.
+// (pour pouvoir les retrouver s'ils ont été supprimés depuis). Textes modifiés, identité, photo et masquages restent globaux.
 function snapshot() {
-  const { photo, edits, custom, identity, ...selection } = fullState();
+  const { photo, edits, custom, identity, hiddenProfiles, hiddenPhotos, ...selection } = fullState();
   return { ...selection, levels: { ...selection.levels }, contact: { ...selection.contact }, customItems: custom.map((c) => ({ ...c })), customPhoto: Boolean(photo) };
 }
 
@@ -237,6 +237,9 @@ function applySaved(saved) {
   state.titleColor = validColor(saved.titleColor, state.titleColor);
   Object.assign(state.contact, validContact(saved.contact));
   if (saved.github !== undefined) state.github = validGithub(saved.github);
+  // Absents d'une configuration : ces masquages ne changent alors pas.
+  if (Array.isArray(saved.hiddenProfiles)) state.hiddenProfiles = new Set(validIds(saved.hiddenProfiles).filter((key) => Object.hasOwn(ALL_PROFILES, key)));
+  if (Array.isArray(saved.hiddenPhotos)) state.hiddenPhotos = new Set(validIds(saved.hiddenPhotos).filter((id) => CV.photos.some((p) => p.id === id)));
   if (CV.photos.some((p) => p.id === saved.photoChoice)) state.photoChoice = saved.photoChoice;
   if (CV.summary.variants.some((v) => v.id === saved.summaryChoice)) state.summaryChoice = saved.summaryChoice;
   const photo = validPhoto(saved.photo);
@@ -295,6 +298,24 @@ function applyProfile(key) {
   const profile = ALL_PROFILES[key];
   state.checked = new Set(profile.ids === "all" ? allIds() : profile.ids);
   state.hidden = new Set();
+}
+
+// Profils prédéfinis et photos proposées viennent de data.js : on ne peut pas les supprimer depuis le navigateur,
+// seulement les masquer (et les rétablir).
+const visibleProfileKeys = () => Object.keys(ALL_PROFILES).filter((key) => !state.hiddenProfiles.has(key));
+const visiblePhotos = () => CV.photos.filter((p) => !state.hiddenPhotos.has(p.id));
+
+function hideProfile(key) {
+  state.hiddenProfiles.add(key);
+}
+
+// Si la photo masquée était celle affichée, on passe à la première encore visible (ou aucune).
+function hidePhoto(id) {
+  state.hiddenPhotos.add(id);
+  if (state.photoChoice === id) {
+    const first = visiblePhotos()[0];
+    state.photoChoice = first ? first.id : "";
+  }
 }
 
 const isOn = (id) => state.checked.has(id);
@@ -408,20 +429,40 @@ function setupEditing() {
 }
 
 // --- Configurations nommées et sauvegarde de secours ---
-function renderConfigs() {
-  const list = document.getElementById("config-list");
-  list.replaceChildren();
-  state.configs.forEach((config, index) => {
-    const item = el("li", "config-item");
-    item.appendChild(el("span", "config-name", config.name));
-    const load = UI_TEXT.configLoad[state.lang];
-    const del = UI_TEXT.configDelete[state.lang];
-    item.append(
-      chip(load, () => loadConfig(index), { label: load + " : " + config.name }),
-      chip(del, () => deleteConfig(index), { label: del + " : " + config.name }),
-    );
-    list.appendChild(item);
+// Bouton accolé d'un « × » qui supprime l'élément ; le nom accessible du × dit ce qu'il supprime.
+function withDelete(button, name, onDelete) {
+  const wrap = el("span", "chip-group");
+  const del = el("button", "chip-del", "×");
+  del.type = "button";
+  del.setAttribute("aria-label", UI_TEXT.configDelete[state.lang] + " : " + name);
+  del.addEventListener("click", onDelete);
+  wrap.append(button, del);
+  return wrap;
+}
+
+// Rangée « Profils » : profils prédéfinis visibles (data.js), puis profils créés (les configurations enregistrées).
+// Un profil est une action (il coche un lot d'éléments), pas un état : pas d'aria-pressed.
+function renderProfiles() {
+  const box = document.getElementById("profiles");
+  box.replaceChildren();
+  visibleProfileKeys().forEach((key) => {
+    const name = t(ALL_PROFILES[key].label);
+    const apply = chip(name, () => {
+      applyProfile(key);
+      saveState();
+      renderCV();
+      syncControls();
+    });
+    box.appendChild(withDelete(apply, name, () => {
+      hideProfile(key);
+      saveState();
+      renderProfiles();
+    }));
   });
+  state.configs.forEach((config, index) => {
+    box.appendChild(withDelete(chip(config.name, () => loadConfig(index)), config.name, () => deleteConfig(index)));
+  });
+  document.getElementById("profiles-restore").hidden = state.hiddenProfiles.size === 0;
 }
 
 function refreshAll() {
@@ -447,7 +488,7 @@ function saveConfig() {
   }
   saveConfigs();
   input.value = "";
-  renderConfigs();
+  renderProfiles();
 }
 
 // Remet les éléments ajoutés cochés dans la configuration (et les expériences parentes de leurs puces)
@@ -486,7 +527,7 @@ function deleteConfig(index) {
   if (!window.confirm(UI_TEXT.configDeleteConfirm[state.lang])) return;
   state.configs.splice(index, 1);
   saveConfigs();
-  renderConfigs();
+  renderProfiles();
 }
 
 function buildBackup() {
@@ -516,6 +557,8 @@ function emptyProgress() {
     contact: { address: true, phone: true, email: true, github: true },
     photoChoice: CV.photos.length > 0 ? CV.photos[0].id : "",
     summaryChoice: CV.summary.variants[0].id,
+    hiddenProfiles: [],
+    hiddenPhotos: [],
   };
 }
 
@@ -553,6 +596,11 @@ function setupConfigs() {
   document.getElementById("config-save").addEventListener("click", saveConfig);
   document.getElementById("config-name").addEventListener("keydown", (event) => {
     if (event.key === "Enter") saveConfig();
+  });
+  document.getElementById("profiles-restore").addEventListener("click", () => {
+    state.hiddenProfiles.clear();
+    saveState();
+    renderProfiles();
   });
   document.getElementById("backup-export").addEventListener("click", exportBackup);
   const file = document.getElementById("backup-file");
@@ -1049,18 +1097,47 @@ function photoControls() {
   const actions = el("div", "photo-actions");
   actions.append(chip(UI_TEXT.importPhoto[state.lang], () => file.click(), { disabled: noPhoto }), file);
 
-  // Photos fournies : en choisir une remplace la photo importée.
+  // Photo importée : toujours celle affichée quand elle existe (choisir une photo fournie l'efface).
+  // Ce n'est pas une action, d'où un simple libellé ; le × l'efface définitivement de ce navigateur.
   const choices = el("div", "photo-actions");
-  CV.photos.forEach((photo) => {
-    choices.appendChild(chip(t(photo.label), () => {
+  const importedName = UI_TEXT.importedPhoto[state.lang];
+  const imported = withDelete(el("span", "chip current", importedName), importedName, () => {
+    if (!window.confirm(UI_TEXT.importedPhotoDeleteConfirm[state.lang])) return;
+    state.photo = null;
+    savePhoto();
+    saveState();
+    renderCV();
+    syncControls();
+  });
+  onSync(() => { imported.hidden = !state.photo; });
+  choices.appendChild(imported);
+
+  // Photos fournies : en choisir une remplace la photo importée ; le × la masque seulement (fichier sur le serveur).
+  visiblePhotos().forEach((photo) => {
+    const name = t(photo.label);
+    const select = chip(name, () => {
       state.photoChoice = photo.id;
       state.photo = null;
       savePhoto();
       saveState();
       renderCV();
       syncControls();
-    }, { disabled: noPhoto, pressed: () => !state.photo && state.photoChoice === photo.id }));
+    }, { disabled: noPhoto, pressed: () => !state.photo && state.photoChoice === photo.id });
+    choices.appendChild(withDelete(select, name, () => {
+      hidePhoto(photo.id);
+      saveState();
+      renderControls();
+      renderCV();
+    }));
   });
+  if (state.hiddenPhotos.size > 0) {
+    actions.appendChild(chip(UI_TEXT.photosRestore[state.lang], () => {
+      state.hiddenPhotos.clear();
+      saveState();
+      renderControls();
+      renderCV();
+    }));
+  }
   box.append(el("p", "label", UI_TEXT.photoChoices[state.lang]), choices, actions, message);
   return box;
 }
@@ -1222,6 +1299,8 @@ function renderToolbar() {
   setText("label-configs", UI_TEXT.configsLabel[lang]);
   setText("configs-hint", UI_TEXT.configsHint[lang]);
   setText("config-save", UI_TEXT.configSave[lang]);
+  setText("profiles-hint", UI_TEXT.profilesHint[lang]);
+  setText("profiles-restore", UI_TEXT.profilesRestore[lang]);
   setText("backup-export", UI_TEXT.backupExport[lang]);
   setText("backup-import", UI_TEXT.backupImport[lang]);
   setText("backup-note", UI_TEXT.backupNote[lang]);
@@ -1235,24 +1314,12 @@ function renderToolbar() {
   configName.setAttribute("aria-label", UI_TEXT.configName[lang]);
   configName.maxLength = LIMITS.configName;
   setSaveStatus(!state.saveFailed);
-  renderConfigs();
+  renderProfiles();
   document.documentElement.lang = lang;
   document.title = pageTitle();
 
   document.querySelectorAll("[data-lang]").forEach((btn) => {
     btn.setAttribute("aria-pressed", String(btn.dataset.lang === lang));
-  });
-
-  // Un profil est une action (il coche un lot d'éléments), pas un état : pas d'aria-pressed.
-  const profileBox = document.getElementById("profiles");
-  profileBox.replaceChildren();
-  Object.keys(ALL_PROFILES).forEach((key) => {
-    profileBox.appendChild(chip(t(ALL_PROFILES[key].label), () => {
-      applyProfile(key);
-      saveState();
-      renderCV();
-      syncControls();
-    }));
   });
 }
 
@@ -1285,7 +1352,7 @@ function entryRow(item) {
 }
 
 function renderHeader(cv) {
-  const providedPhoto = CV.photos.find((p) => p.id === state.photoChoice);
+  const providedPhoto = visiblePhotos().find((p) => p.id === state.photoChoice);
   const photoSrc = state.photo || (providedPhoto && providedPhoto.src);
   const showPhoto = state.showPhoto && Boolean(photoSrc);
   const header = el("header", "cv-header");

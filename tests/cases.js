@@ -44,8 +44,18 @@ function resetApp(storage) {
   state.edits = validEdits(null);
   state.levels = defaultLevels();
   state.hidden = new Set();
+  state.hiddenProfiles = new Set();
+  state.hiddenPhotos = new Set();
   applyProfile("all");
 }
+
+// Remplace temporairement les photos proposées (les données d'exemple n'en ont aucune).
+function withPhotos(photos, fn) {
+  const previous = CV.photos;
+  CV.photos = photos;
+  try { fn(); } finally { CV.photos = previous; }
+}
+const TWO_PHOTOS = [{ id: "a", src: "a.jpg", label: { fr: "A" } }, { id: "b", src: "b.jpg", label: { fr: "B" } }];
 
 const PIXEL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=";
 
@@ -391,6 +401,52 @@ test("cropRect : un centre hors de l'image est ramené au bord", () => {
 test("cropRect : le zoom est borné entre 1 et le maximum", () => {
   same(cropRect(400, 200, 1, 0.1, 200, 100), cropRect(400, 200, 1, 1, 200, 100));
   same(cropRect(400, 400, 1, 99, 200, 200).w, 400 / PHOTO_MAX_ZOOM);
+});
+
+// --- Profils et photos masqués ---
+test("masquer un profil prédéfini le retire de la liste, et il est retenu au rechargement", () => {
+  const storage = fakeStorage();
+  resetApp(storage);
+  hideProfile("all");
+  assert(!visibleProfileKeys().includes("all"), "« Tout » doit être masqué");
+  assert(visibleProfileKeys().includes("empty"), "« Vide » doit rester");
+  saveState();
+  state.hiddenProfiles = new Set();
+  loadState();
+  assert(state.hiddenProfiles.has("all"), "le masquage doit survivre au rechargement");
+});
+
+test("au chargement, les profils et photos masqués inconnus sont ignorés", () => {
+  resetApp(fakeStorage());
+  applySaved({ lang: "fr", checked: [], hiddenProfiles: ["all", "nexistepas"], hiddenPhotos: ["fantome"] });
+  same([...state.hiddenProfiles], ["all"]);
+  same([...state.hiddenPhotos], []);
+});
+
+test("une configuration (profil créé) ne garde pas les profils ni les photos masqués", () => {
+  resetApp(fakeStorage());
+  hideProfile("empty");
+  const data = snapshot();
+  assert(!("hiddenProfiles" in data) && !("hiddenPhotos" in data), "masquages globaux, pas par profil");
+});
+
+test("masquer la photo affichée bascule sur la première photo encore visible", () => {
+  withPhotos(TWO_PHOTOS, () => {
+    resetApp(fakeStorage());
+    state.photoChoice = "a";
+    hidePhoto("a");
+    same(state.photoChoice, "b");
+    same(visiblePhotos().map((p) => p.id), ["b"]);
+    hidePhoto("b");
+    same(state.photoChoice, "", "plus aucune photo proposée visible");
+  });
+});
+
+test("importer une sauvegarde remet les profils et photos masqués à zéro", () => {
+  resetApp(fakeStorage());
+  hideProfile("all");
+  assert(applyBackup({ app: "cv-modulaire", version: 1, state: { lang: "fr", checked: [] }, configs: [] }));
+  same(state.hiddenProfiles.size, 0);
 });
 
 // --- Exécution ---

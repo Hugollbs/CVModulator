@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CV modulaire</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261124c">
+  <link rel="stylesheet" href="style.css?v=20261124d">
 </head>
 <body>
   <aside class="sidebar">
@@ -25,16 +25,17 @@
     <div class="block">
       <p class="label" id="label-profiles"></p>
       <div class="chips" id="profiles"></div>
+      <div class="config-save">
+        <input type="text" id="config-name" autocomplete="off">
+        <button type="button" class="chip" id="config-save"></button>
+      </div>
+      <button type="button" class="chip" id="profiles-restore" hidden></button>
+      <p class="hint" id="profiles-hint"></p>
     </div>
 
     <details class="block fold">
       <summary class="label" id="label-configs"></summary>
       <p class="hint" id="configs-hint"></p>
-      <div class="config-save">
-        <input type="text" id="config-name" autocomplete="off">
-        <button type="button" class="chip" id="config-save"></button>
-      </div>
-      <ul class="config-list" id="config-list"></ul>
       <div class="options">
         <button type="button" class="chip" id="backup-export"></button>
         <button type="button" class="chip" id="backup-import"></button>
@@ -64,9 +65,9 @@
     <article id="cv" class="page"></article>
   </main>
 
-  <script src="data.js?v=20261124c"></script>
-  <script src="i18n.js?v=20261124c"></script>
-  <script src="validate.js?v=20261124c"></script>
-  <script src="app.js?v=20261124c"></script>
+  <script src="data.js?v=20261124d"></script>
+  <script src="i18n.js?v=20261124d"></script>
+  <script src="validate.js?v=20261124d"></script>
+  <script src="app.js?v=20261124d"></script>
 </body>
 </html>
